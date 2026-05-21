@@ -114,9 +114,9 @@ function CampaignsPage() {
 
   return (
     <div className="space-y-5">
-      <div className="flex justify-between items-end">
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-end gap-3">
         <div>
-          <h1 className="text-2xl font-bold">Campaigns</h1>
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Campaigns</h1>
           <p className="text-sm text-muted-foreground">Send email blasts and track results</p>
         </div>
         <Dialog open={open} onOpenChange={(v) => { if (!sending) setOpen(v); }}>

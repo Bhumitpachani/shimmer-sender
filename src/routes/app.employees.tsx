@@ -62,9 +62,9 @@ function EmployeesPage() {
 
   return (
     <div className="space-y-5">
-      <div className="flex justify-between items-end">
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-end gap-3">
         <div>
-          <h1 className="text-2xl font-bold">Employees</h1>
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Employees</h1>
           <p className="text-sm text-muted-foreground">Manage who can add clients</p>
         </div>
         <Dialog open={open} onOpenChange={setOpen}>
@@ -82,6 +82,7 @@ function EmployeesPage() {
       </div>
 
       <Card className="overflow-hidden">
+        <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-muted">
             <tr className="text-left">
@@ -116,6 +117,7 @@ function EmployeesPage() {
             ))}
           </tbody>
         </table>
+        </div>
       </Card>
     </div>
   );

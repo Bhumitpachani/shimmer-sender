@@ -76,9 +76,9 @@ function TemplatesPage() {
 
   return (
     <div className="space-y-5">
-      <div className="flex justify-between items-end">
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-end gap-3">
         <div>
-          <h1 className="text-2xl font-bold">Email Templates</h1>
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Email Templates</h1>
           <p className="text-sm text-muted-foreground">{templates.length} template(s)</p>
         </div>
         <Button onClick={startNew}><Plus className="w-4 h-4 mr-2" />New Template</Button>

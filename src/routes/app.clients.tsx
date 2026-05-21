@@ -136,12 +136,12 @@ function ClientsPage() {
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-wrap items-end justify-between gap-3">
+      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold">Clients</h1>
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Clients</h1>
           <p className="text-sm text-muted-foreground">{filtered.length} of {clients.length} clients</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           <label>
             <input type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleExcel} disabled={uploading} />
             <Button asChild variant="outline" disabled={uploading}>
