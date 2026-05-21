@@ -10,6 +10,7 @@ import { Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/login")({
+  ssr: false,
   component: LoginPage,
 });
 
