@@ -1,14 +1,13 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState, useMemo } from "react";
 import { db, type Client } from "@/lib/db";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Plus, Search, FileSpreadsheet, Filter, MoreHorizontal, Trash2, Eye, X, ChevronDown } from "lucide-react";
+import { Plus, Search, FileSpreadsheet, Filter, MoreHorizontal, Trash2, Eye, X, ChevronDown, Download } from "lucide-react";
 import { toast } from "sonner";
 import { getSession } from "@/lib/session";
 import * as XLSX from "xlsx";
@@ -23,7 +22,15 @@ function cn(...cls: (string | boolean | undefined | null)[]) { return cls.filter
 
 function ClientsPage() {
   const session = getSession();
-  const [clients, setClients] = useState<Client[]>(() => db.clients.getAll());
+  const navigate = useNavigate();
+  const isEmployee = session?.role === "employee";
+
+  const allClients = useMemo(() => {
+    const all = db.clients.getAll();
+    return isEmployee ? all.filter((c) => c.added_by === session?.username) : all;
+  }, [isEmployee, session?.username]);
+
+  const [clients, setClients] = useState<Client[]>(() => allClients);
   const [search, setSearch] = useState("");
   const [country, setCountry] = useState("all");
   const [addedBy, setAddedBy] = useState("all");
@@ -34,25 +41,28 @@ function ClientsPage() {
   const [uploading, setUploading] = useState(false);
   const [form, setForm] = useState({ name: "", email: "", mobile: "", country: "", state: "", website: "", company: "" });
 
-  const load = () => setClients(db.clients.getAll());
+  const load = () => {
+    const all = db.clients.getAll();
+    setClients(isEmployee ? all.filter((c) => c.added_by === session?.username) : all);
+  };
 
   const countries = useMemo(() => Array.from(new Set(clients.map((c) => c.country))).filter(Boolean).sort(), [clients]);
   const addedBys = useMemo(() => Array.from(new Set(clients.map((c) => c.added_by))).filter(Boolean).sort(), [clients]);
 
   const filtered = useMemo(() => clients.filter((c) => {
     if (country !== "all" && c.country !== country) return false;
-    if (addedBy !== "all" && c.added_by !== addedBy) return false;
+    if (!isEmployee && addedBy !== "all" && c.added_by !== addedBy) return false;
     if (dateFrom && new Date(c.created_at) < new Date(dateFrom)) return false;
     if (dateTo && new Date(c.created_at) > new Date(dateTo + "T23:59:59")) return false;
     if (search) {
       const s = search.toLowerCase();
-      return [c.name, c.email, c.mobile, c.company ?? "", c.state ?? "", c.country].some((v) => v.toLowerCase().includes(s));
+      return [c.name, c.email, c.mobile, c.company ?? "", c.state ?? "", c.country, c.added_by].some((v) => v.toLowerCase().includes(s));
     }
     return true;
-  }), [clients, search, country, addedBy, dateFrom, dateTo]);
+  }), [clients, search, country, addedBy, dateFrom, dateTo, isEmployee]);
 
-  const hasFilters = country !== "all" || addedBy !== "all" || !!dateFrom || !!dateTo;
-  const filterCount = [country !== "all", addedBy !== "all", !!dateFrom, !!dateTo].filter(Boolean).length;
+  const hasFilters = country !== "all" || (!isEmployee && addedBy !== "all") || !!dateFrom || !!dateTo;
+  const filterCount = [country !== "all", !isEmployee && addedBy !== "all", !!dateFrom, !!dateTo].filter(Boolean).length;
 
   const clearFilters = () => { setCountry("all"); setAddedBy("all"); setDateFrom(""); setDateTo(""); };
 
@@ -98,12 +108,38 @@ function ClientsPage() {
       }
       toast.success(`Imported ${ok} · ${dup} duplicates · ${bad} invalid`);
       load();
-    } catch (err: any) {
+    } catch {
       toast.error("Failed to read file");
     } finally {
       setUploading(false);
       e.target.value = "";
     }
+  };
+
+  const handleExport = () => {
+    if (filtered.length === 0) { toast.error("No clients to export"); return; }
+    const rows = filtered.map((c) => ({
+      Name: c.name,
+      Email: c.email,
+      Mobile: c.mobile,
+      Country: c.country,
+      State: c.state ?? "",
+      Company: c.company ?? "",
+      Website: c.website ?? "",
+      "Added By": c.added_by,
+      "Date Added": new Date(c.created_at).toLocaleDateString(),
+    }));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Clients");
+    const label = [
+      country !== "all" ? country : "",
+      !isEmployee && addedBy !== "all" ? addedBy : "",
+      dateFrom ? `from-${dateFrom}` : "",
+      dateTo ? `to-${dateTo}` : "",
+    ].filter(Boolean).join("_") || "all";
+    XLSX.writeFile(wb, `clients_${label}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    toast.success(`Exported ${filtered.length} clients`);
   };
 
   return (
@@ -114,9 +150,14 @@ function ClientsPage() {
             <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Clients</h1>
             <span className="px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-600 text-xs font-semibold">{clients.length}</span>
           </div>
-          <p className="text-sm text-slate-500 mt-0.5">Manage and organize all your contacts</p>
+          <p className="text-sm text-slate-500 mt-0.5">
+            {isEmployee ? "Your added clients" : "Manage and organize all your contacts"}
+          </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
+          <Button variant="outline" size="sm" className="gap-1.5 shadow-sm" onClick={handleExport}>
+            <Download className="w-4 h-4" />Export
+          </Button>
           <label className="cursor-pointer">
             <input type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleExcel} disabled={uploading} />
             <span className={cn("inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-sm font-medium text-slate-700 transition-colors shadow-sm cursor-pointer", uploading && "opacity-60 pointer-events-none")}>
@@ -178,13 +219,15 @@ function ClientsPage() {
                 {countries.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
               </SelectContent>
             </Select>
-            <Select value={addedBy} onValueChange={setAddedBy}>
-              <SelectTrigger className="h-8 text-sm bg-slate-50"><SelectValue placeholder="Added by anyone" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Added by anyone</SelectItem>
-                {addedBys.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
-              </SelectContent>
-            </Select>
+            {!isEmployee && (
+              <Select value={addedBy} onValueChange={setAddedBy}>
+                <SelectTrigger className="h-8 text-sm bg-slate-50"><SelectValue placeholder="Added by anyone" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Added by anyone</SelectItem>
+                  {addedBys.map((u) => <SelectItem key={u} value={u}>{u}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            )}
             <div className="flex gap-2">
               <div className="flex-1"><Label className="text-xs text-slate-500 mb-1 block">From</Label><Input type="date" className="h-8 text-sm" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} /></div>
               <div className="flex-1"><Label className="text-xs text-slate-500 mb-1 block">To</Label><Input type="date" className="h-8 text-sm" value={dateTo} onChange={(e) => setDateTo(e.target.value)} /></div>
@@ -216,14 +259,15 @@ function ClientsPage() {
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider hidden lg:table-cell">Mobile</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider hidden xl:table-cell">State / City</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider hidden xl:table-cell">Company</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider hidden lg:table-cell">Added</th>
-                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider w-16"></th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider hidden lg:table-cell">Added By</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider hidden lg:table-cell">Date</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider w-20"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-4 py-14 text-center">
+                  <td colSpan={9} className="px-4 py-14 text-center">
                     <div className="flex flex-col items-center gap-2">
                       <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center">
                         <Search className="w-4 h-4 text-slate-400" />
@@ -241,7 +285,12 @@ function ClientsPage() {
                         {c.name.charAt(0).toUpperCase()}
                       </div>
                       <div className="min-w-0">
-                        <Link to="/app/clients/$id" params={{ id: c.id }} className="font-semibold text-slate-800 dark:text-white hover:text-primary transition-colors truncate block">{c.name}</Link>
+                        <button
+                          onClick={() => navigate({ to: "/app/clients/$id", params: { id: c.id } })}
+                          className="font-semibold text-slate-800 dark:text-white hover:text-primary transition-colors truncate block text-left"
+                        >
+                          {c.name}
+                        </button>
                         <div className="text-xs text-slate-400 truncate md:hidden">{c.email}</div>
                       </div>
                     </div>
@@ -253,26 +302,36 @@ function ClientsPage() {
                   <td className="px-4 py-3 hidden lg:table-cell text-slate-500 text-xs">{c.mobile}</td>
                   <td className="px-4 py-3 hidden xl:table-cell text-slate-500 text-xs">{c.state ?? "—"}</td>
                   <td className="px-4 py-3 hidden xl:table-cell text-slate-500 text-xs">{c.company ?? "—"}</td>
+                  <td className="px-4 py-3 hidden lg:table-cell">
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600">{c.added_by}</span>
+                  </td>
                   <td className="px-4 py-3 hidden lg:table-cell text-slate-400 text-xs">{new Date(c.created_at).toLocaleDateString()}</td>
                   <td className="px-4 py-3 text-right">
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <button className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors text-slate-400 hover:text-slate-600">
-                          <MoreHorizontal className="w-4 h-4" />
-                        </button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" className="w-44">
-                        <DropdownMenuItem asChild>
-                          <Link to="/app/clients/$id" params={{ id: c.id }} className="flex items-center gap-2 cursor-pointer">
+                    <div className="flex items-center justify-end gap-1">
+                      <button
+                        onClick={() => navigate({ to: "/app/clients/$id", params: { id: c.id } })}
+                        className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors text-slate-400 hover:text-primary"
+                        title="View Details"
+                      >
+                        <Eye className="w-4 h-4" />
+                      </button>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <button className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors text-slate-400 hover:text-slate-600">
+                            <MoreHorizontal className="w-4 h-4" />
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-40">
+                          <DropdownMenuItem onClick={() => navigate({ to: "/app/clients/$id", params: { id: c.id } })} className="gap-2 cursor-pointer">
                             <Eye className="w-3.5 h-3.5" /> View Details
-                          </Link>
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem className="text-destructive focus:text-destructive gap-2 cursor-pointer" onClick={() => handleDelete(c.id, c.name)}>
-                          <Trash2 className="w-3.5 h-3.5" /> Delete
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem className="text-destructive focus:text-destructive gap-2 cursor-pointer" onClick={() => handleDelete(c.id, c.name)}>
+                            <Trash2 className="w-3.5 h-3.5" /> Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
                   </td>
                 </tr>
               ))}

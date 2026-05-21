@@ -4,12 +4,8 @@ import {
   Link,
   createRootRouteWithContext,
   useRouter,
-  HeadContent,
-  Scripts,
 } from "@tanstack/react-router";
 import { Toaster } from "@/components/ui/sonner";
-
-import appCss from "../styles.css?url";
 
 function NotFoundComponent() {
   return (
@@ -69,47 +65,10 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
 }
 
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
-  head: () => ({
-    meta: [
-      { charSet: "utf-8" },
-      { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Starlink Jewels — Email Marketing" },
-      { name: "description", content: "Email marketing dashboard for Starlink Jewels: manage clients, templates, and campaigns." },
-      { property: "og:title", content: "Starlink Jewels — Email Marketing" },
-      { property: "og:description", content: "Email marketing dashboard for Starlink Jewels: manage clients, templates, and campaigns." },
-      { property: "og:type", content: "website" },
-      { name: "twitter:title", content: "Starlink Jewels — Email Marketing" },
-      { name: "twitter:description", content: "Email marketing dashboard for Starlink Jewels: manage clients, templates, and campaigns." },
-      { property: "og:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/ae9d6861-6122-4690-b3b5-00f9efc04a53/id-preview-2efc68c5--6fe1c2d7-20c7-4678-bca5-841052ccc123.lovable.app-1779340857315.png" },
-      { name: "twitter:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/ae9d6861-6122-4690-b3b5-00f9efc04a53/id-preview-2efc68c5--6fe1c2d7-20c7-4678-bca5-841052ccc123.lovable.app-1779340857315.png" },
-      { name: "twitter:card", content: "summary_large_image" },
-    ],
-    links: [
-      {
-        rel: "stylesheet",
-        href: appCss,
-      },
-    ],
-  }),
-  shellComponent: RootShell,
   component: RootComponent,
   notFoundComponent: NotFoundComponent,
   errorComponent: ErrorComponent,
 });
-
-function RootShell({ children }: { children: React.ReactNode }) {
-  return (
-    <html lang="en">
-      <head>
-        <HeadContent />
-      </head>
-      <body>
-        {children}
-        <Scripts />
-      </body>
-    </html>
-  );
-}
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();

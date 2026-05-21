@@ -27,12 +27,16 @@ function write<T>(key: string, data: T[]): void {
   localStorage.setItem(key, JSON.stringify(data));
 }
 
+export const ALL_PERMISSIONS = ["dashboard", "clients", "campaigns", "templates"] as const;
+export type Permission = typeof ALL_PERMISSIONS[number];
+
 export interface Employee {
   id: string;
   username: string;
   password: string;
   name: string;
   role: "admin" | "employee";
+  permissions: Permission[];
   created_at: string;
 }
 
@@ -96,6 +100,7 @@ function seed() {
         password: "123",
         name: "Administrator",
         role: "admin",
+        permissions: [...ALL_PERMISSIONS],
         created_at: now(),
       },
     ]);
@@ -104,22 +109,31 @@ function seed() {
 
 if (typeof window !== "undefined") seed();
 
+function normalizeEmployee(e: any): Employee {
+  return {
+    ...e,
+    permissions: Array.isArray(e.permissions) ? e.permissions : ["clients", "campaigns"],
+  };
+}
+
 export const db = {
   employees: {
     getAll(): Employee[] {
-      return read<Employee>(KEYS.employees).sort(
-        (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-      );
+      return read<any>(KEYS.employees)
+        .map(normalizeEmployee)
+        .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
     },
     getByUsername(username: string): Employee | null {
-      return read<Employee>(KEYS.employees).find((e) => e.username === username) ?? null;
+      const e = read<any>(KEYS.employees).find((e) => e.username === username);
+      return e ? normalizeEmployee(e) : null;
     },
     getById(id: string): Employee | null {
-      return read<Employee>(KEYS.employees).find((e) => e.id === id) ?? null;
+      const e = read<any>(KEYS.employees).find((e) => e.id === id);
+      return e ? normalizeEmployee(e) : null;
     },
     insert(data: Omit<Employee, "id" | "created_at">): { error: string | null } {
-      const all = read<Employee>(KEYS.employees);
-      if (all.some((e) => e.username === data.username)) {
+      const all = read<any>(KEYS.employees);
+      if (all.some((e: any) => e.username === data.username)) {
         return { error: "23505" };
       }
       all.push({ ...data, id: uid(), created_at: now() });
@@ -127,7 +141,7 @@ export const db = {
       return { error: null };
     },
     delete(id: string): { error: string | null } {
-      const all = read<Employee>(KEYS.employees).filter((e) => e.id !== id);
+      const all = read<any>(KEYS.employees).filter((e: any) => e.id !== id);
       write(KEYS.employees, all);
       return { error: null };
     },

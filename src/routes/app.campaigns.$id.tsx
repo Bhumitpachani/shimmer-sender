@@ -1,7 +1,8 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { db } from "@/lib/db";
-import { ArrowLeft, CheckCircle2, XCircle, Send, Users, TrendingUp, AlertCircle } from "lucide-react";
+import { getSession } from "@/lib/session";
+import { ArrowLeft, CheckCircle2, XCircle, Send, Users, TrendingUp, AlertCircle, User } from "lucide-react";
 
 export const Route = createFileRoute("/app/campaigns/$id")({
   component: CampaignDetail,
@@ -13,8 +14,11 @@ function cn(...cls: (string | boolean | undefined | null)[]) {
 
 function CampaignDetail() {
   const { id } = Route.useParams();
+  const session = getSession();
+  const isAdmin = session?.role === "admin";
+
   const [campaign] = useState(() => db.campaigns.getById(id));
-  const [history] = useState(() => db.sendHistory.getByCampaignId(id));
+  const [allHistory] = useState(() => db.sendHistory.getByCampaignId(id));
   const [templates] = useState(() => db.templates.getAll());
   const [clients] = useState(() => db.clients.getAll());
 
@@ -43,12 +47,20 @@ function CampaignDetail() {
   const total = campaign.total_recipients || 1;
   const successRate = Math.round((campaign.success_count / total) * 100);
 
+  const history = isAdmin
+    ? allHistory
+    : allHistory.filter((h) => h.sent_by === session?.username);
+
   const statusColors: Record<string, string> = {
     completed: "bg-emerald-100 text-emerald-700 border-emerald-200",
     running: "bg-amber-100 text-amber-700 border-amber-200",
     failed: "bg-red-100 text-red-600 border-red-200",
     pending: "bg-slate-100 text-slate-500 border-slate-200",
   };
+
+  const sentByList = isAdmin
+    ? Array.from(new Set(allHistory.map((h) => h.sent_by))).filter(Boolean)
+    : [];
 
   return (
     <div className="space-y-5">
@@ -70,7 +82,10 @@ function CampaignDetail() {
               </div>
               <div>
                 <h1 className="text-xl font-bold text-slate-900 dark:text-white">{campaign.name}</h1>
-                <p className="text-sm text-slate-500 mt-0.5">Started by {campaign.started_by} · {new Date(campaign.created_at).toLocaleString()}</p>
+                <p className="text-sm text-slate-500 mt-0.5">
+                  Started by <span className="font-medium text-slate-700">{campaign.started_by}</span>
+                  {" · "}{new Date(campaign.created_at).toLocaleString()}
+                </p>
               </div>
             </div>
           </div>
@@ -85,6 +100,17 @@ function CampaignDetail() {
           <InfoField label="Country Filter" value={campaign.country ?? "All clients"} />
           <InfoField label="Date Range" value={campaign.date_from ? `${campaign.date_from} → ${campaign.date_to ?? "…"}` : "No filter"} />
         </div>
+
+        {isAdmin && sentByList.length > 1 && (
+          <div className="mt-4 pt-4 border-t border-slate-100 flex flex-wrap gap-2 items-center">
+            <span className="text-xs text-slate-400 font-medium">Sent by:</span>
+            {sentByList.map((u) => (
+              <span key={u} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600">
+                <User className="w-3 h-3" />{u}
+              </span>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
@@ -97,7 +123,12 @@ function CampaignDetail() {
       <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
         <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
           <h2 className="font-semibold text-slate-800 dark:text-white">Send Log</h2>
-          <span className="text-xs text-slate-400 bg-slate-100 dark:bg-slate-800 px-2.5 py-1 rounded-full font-medium">{history.length} entries</span>
+          <div className="flex items-center gap-2">
+            {!isAdmin && allHistory.length !== history.length && (
+              <span className="text-xs text-slate-400">Showing your {history.length} of {allHistory.length} entries</span>
+            )}
+            <span className="text-xs text-slate-400 bg-slate-100 dark:bg-slate-800 px-2.5 py-1 rounded-full font-medium">{history.length} entries</span>
+          </div>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -107,13 +138,14 @@ function CampaignDetail() {
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider hidden sm:table-cell">Client</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Email</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Status</th>
+                {isAdmin && <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider hidden md:table-cell">Sent By</th>}
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider hidden md:table-cell">Error</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {history.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-4 py-14 text-center">
+                  <td colSpan={isAdmin ? 6 : 5} className="px-4 py-14 text-center">
                     <div className="flex flex-col items-center gap-2">
                       <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center">
                         <Send className="w-4 h-4 text-slate-400" />
@@ -147,6 +179,13 @@ function CampaignDetail() {
                         </span>
                       )}
                     </td>
+                    {isAdmin && (
+                      <td className="px-4 py-3 hidden md:table-cell">
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600">
+                          <User className="w-2.5 h-2.5" />{h.sent_by}
+                        </span>
+                      </td>
+                    )}
                     <td className="px-4 py-3 hidden md:table-cell text-xs text-slate-400 max-w-[200px] truncate" title={h.error ?? ""}>
                       {h.error ?? "—"}
                     </td>

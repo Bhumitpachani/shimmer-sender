@@ -1,8 +1,11 @@
+import type { Permission } from "./db";
+
 export interface Session {
   id: string;
   username: string;
   name: string;
   role: "admin" | "employee";
+  permissions: Permission[];
 }
 
 const KEY = "sj_session";
@@ -12,7 +15,11 @@ export function getSession(): Session | null {
   const raw = localStorage.getItem(KEY);
   if (!raw) return null;
   try {
-    return JSON.parse(raw) as Session;
+    const s = JSON.parse(raw) as any;
+    return {
+      ...s,
+      permissions: Array.isArray(s.permissions) ? s.permissions : ["clients", "campaigns"],
+    } as Session;
   } catch {
     return null;
   }

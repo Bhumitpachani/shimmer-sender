@@ -1,18 +1,25 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { db } from "@/lib/db";
+import { db, ALL_PERMISSIONS, type Permission } from "@/lib/db";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Plus, ShieldCheck, User, Trash2, MoreHorizontal, Users } from "lucide-react";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Plus, ShieldCheck, User, Trash2, MoreHorizontal, Users, LayoutDashboard, Users as UsersIcon, Send, Mail } from "lucide-react";
 import { toast } from "sonner";
 import { getSession } from "@/lib/session";
 
 export const Route = createFileRoute("/app/employees")({
   component: EmployeesPage,
 });
+
+const PERMISSION_META: { key: Permission; label: string; icon: any; desc: string }[] = [
+  { key: "dashboard", label: "Dashboard", icon: LayoutDashboard, desc: "View stats & overview" },
+  { key: "clients", label: "Clients", icon: UsersIcon, desc: "Manage client contacts" },
+  { key: "campaigns", label: "Campaigns", icon: Send, desc: "Launch & view campaigns" },
+  { key: "templates", label: "Templates", icon: Mail, desc: "Create & edit templates" },
+];
 
 const AVATAR_COLORS = ["bg-red-400","bg-orange-400","bg-amber-400","bg-lime-500","bg-green-500","bg-teal-500","bg-cyan-500","bg-sky-500","bg-blue-500","bg-indigo-500","bg-violet-500","bg-purple-500","bg-pink-500","bg-rose-400"];
 function getAvatarColor(name: string) { return AVATAR_COLORS[name.charCodeAt(0) % AVATAR_COLORS.length]; }
@@ -24,6 +31,7 @@ function EmployeesPage() {
   const [employees, setEmployees] = useState(() => db.employees.getAll());
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({ name: "", username: "", password: "" });
+  const [permissions, setPermissions] = useState<Permission[]>(["clients", "campaigns"]);
 
   useEffect(() => {
     if (session && session.role !== "admin") navigate({ to: "/app/clients" });
@@ -31,13 +39,25 @@ function EmployeesPage() {
 
   const load = () => setEmployees(db.employees.getAll());
 
+  const togglePerm = (p: Permission) => {
+    setPermissions((prev) => prev.includes(p) ? prev.filter((x) => x !== p) : [...prev, p]);
+  };
+
   const handleAdd = (e: React.FormEvent) => {
     e.preventDefault();
-    const { error } = db.employees.insert({ name: form.name.trim(), username: form.username.trim(), password: form.password, role: "employee" });
+    if (permissions.length === 0) { toast.error("Grant at least one permission"); return; }
+    const { error } = db.employees.insert({
+      name: form.name.trim(),
+      username: form.username.trim(),
+      password: form.password,
+      role: "employee",
+      permissions,
+    });
     if (error === "23505") { toast.error("Username already taken"); return; }
     if (error) { toast.error(error); return; }
     toast.success("Employee added");
     setForm({ name: "", username: "", password: "" });
+    setPermissions(["clients", "campaigns"]);
     setOpen(false);
     load();
   };
@@ -65,7 +85,7 @@ function EmployeesPage() {
           </div>
           <p className="text-sm text-slate-500 mt-0.5">Manage team access and credentials</p>
         </div>
-        <Dialog open={open} onOpenChange={setOpen}>
+        <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) { setForm({ name: "", username: "", password: "" }); setPermissions(["clients", "campaigns"]); } }}>
           <DialogTrigger asChild>
             <Button className="gap-1.5 shadow-sm shadow-primary/20"><Plus className="w-4 h-4" />Add Employee</Button>
           </DialogTrigger>
@@ -75,7 +95,36 @@ function EmployeesPage() {
               <div><Label>Full Name *</Label><Input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} autoFocus className="mt-1.5" placeholder="e.g. Rahul Sharma" /></div>
               <div><Label>Username *</Label><Input required value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} className="mt-1.5" placeholder="unique username" /></div>
               <div><Label>Password *</Label><Input required value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} className="mt-1.5" placeholder="set a password" /></div>
-              <p className="text-xs text-slate-400">Employee will have access to Clients and Campaigns only.</p>
+
+              <div>
+                <Label className="block mb-2">Sidebar Access *</Label>
+                <div className="grid grid-cols-2 gap-2">
+                  {PERMISSION_META.map(({ key, label, icon: Icon, desc }) => {
+                    const checked = permissions.includes(key);
+                    return (
+                      <button
+                        key={key}
+                        type="button"
+                        onClick={() => togglePerm(key)}
+                        className={cn(
+                          "flex items-start gap-2.5 p-2.5 rounded-lg border text-left transition-all",
+                          checked ? "border-primary/50 bg-primary/5 text-primary" : "border-slate-200 bg-slate-50 text-slate-500 hover:border-slate-300"
+                        )}
+                      >
+                        <div className={cn("w-6 h-6 rounded flex items-center justify-center shrink-0 mt-0.5", checked ? "bg-primary/15" : "bg-slate-200")}>
+                          <Icon className="w-3.5 h-3.5" />
+                        </div>
+                        <div>
+                          <div className={cn("text-xs font-semibold", checked ? "text-primary" : "text-slate-700")}>{label}</div>
+                          <div className="text-[10px] text-slate-400 leading-tight">{desc}</div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+                {permissions.length === 0 && <p className="text-xs text-red-500 mt-1.5">Select at least one section.</p>}
+              </div>
+
               <Button type="submit" className="w-full">Create Employee</Button>
             </form>
           </DialogContent>
@@ -117,9 +166,17 @@ function EmployeesPage() {
                 {e.name.charAt(0).toUpperCase()}
               </div>
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <span className="font-semibold text-slate-800 dark:text-white text-sm">{e.name}</span>
                   <RoleBadge role={e.role} />
+                  {e.role !== "admin" && e.permissions.map((p) => {
+                    const meta = PERMISSION_META.find((m) => m.key === p);
+                    return meta ? (
+                      <span key={p} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-slate-100 text-slate-500 border border-slate-200">
+                        <meta.icon className="w-2.5 h-2.5" />{meta.label}
+                      </span>
+                    ) : null;
+                  })}
                 </div>
                 <div className="text-xs text-slate-400 mt-0.5 flex items-center gap-3">
                   <span>@{e.username}</span>

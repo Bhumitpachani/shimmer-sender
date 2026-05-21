@@ -5,7 +5,7 @@ import { pingMail } from "@/lib/mailApi";
 import {
   LayoutDashboard, Users, Mail, Send, UserCog, LogOut, Sparkles,
   Wifi, WifiOff, RefreshCw, Menu, ChevronLeft, ChevronRight,
-  ChevronDown, Server,
+  ChevronDown,
 } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
@@ -26,14 +26,38 @@ function getPageTitle(p: string) {
   return "Dashboard";
 }
 
-const ADMIN_NAV = [
-  { section: "Overview", items: [{ to: "/app", label: "Dashboard", icon: LayoutDashboard, exact: true }] },
-  { section: "Management", items: [{ to: "/app/clients", label: "Clients", icon: Users }, { to: "/app/campaigns", label: "Campaigns", icon: Send }] },
-  { section: "Administration", items: [{ to: "/app/templates", label: "Templates", icon: Mail }, { to: "/app/employees", label: "Employees", icon: UserCog }] },
+const ALL_NAV = [
+  { key: "dashboard", section: "Overview", to: "/app" as const, label: "Dashboard", icon: LayoutDashboard, exact: true, adminOnly: false },
+  { key: "clients", section: "Management", to: "/app/clients" as const, label: "Clients", icon: Users, exact: false, adminOnly: false },
+  { key: "campaigns", section: "Management", to: "/app/campaigns" as const, label: "Campaigns", icon: Send, exact: false, adminOnly: false },
+  { key: "templates", section: "Administration", to: "/app/templates" as const, label: "Templates", icon: Mail, exact: false, adminOnly: false },
+  { key: "employees", section: "Administration", to: "/app/employees" as const, label: "Employees", icon: UserCog, exact: false, adminOnly: true },
 ];
-const EMPLOYEE_NAV = [
-  { section: "Management", items: [{ to: "/app/clients", label: "Clients", icon: Users }, { to: "/app/campaigns", label: "Campaigns", icon: Send }] },
-];
+
+function buildNavSections(session: Session) {
+  const visibleItems = ALL_NAV.filter((item) => {
+    if (session.role === "admin") return true;
+    if (item.adminOnly) return false;
+    return session.permissions.includes(item.key as any);
+  });
+
+  const sections: { section: string; items: typeof ALL_NAV }[] = [];
+  for (const item of visibleItems) {
+    let sec = sections.find((s) => s.section === item.section);
+    if (!sec) { sec = { section: item.section, items: [] }; sections.push(sec); }
+    sec.items.push(item);
+  }
+  return sections;
+}
+
+function getDefaultRedirect(session: Session): string {
+  if (session.role === "admin") return "/app";
+  if (session.permissions.includes("dashboard")) return "/app";
+  if (session.permissions.includes("clients")) return "/app/clients";
+  if (session.permissions.includes("campaigns")) return "/app/campaigns";
+  if (session.permissions.includes("templates")) return "/app/templates";
+  return "/login";
+}
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const navigate = useNavigate();
@@ -47,9 +71,20 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!session) { navigate({ to: "/login" }); return; }
     if (session.role === "employee") {
-      const blocked = ["/app", "/app/templates", "/app/employees"];
-      const hit = blocked.some((p) => p === "/app" ? location.pathname === "/app" || location.pathname === "/app/" : location.pathname.startsWith(p));
-      if (hit) navigate({ to: "/app/clients" });
+      const path = location.pathname;
+      const allowed = ALL_NAV.filter((item) => {
+        if (item.adminOnly) return false;
+        return session.permissions.includes(item.key as any);
+      });
+      const isAllowed =
+        allowed.some((item) =>
+          item.exact
+            ? path === item.to || path === item.to + "/"
+            : path === item.to || path.startsWith(item.to + "/")
+        );
+      if (!isAllowed) {
+        navigate({ to: getDefaultRedirect(session) as any });
+      }
     }
   }, [session, navigate, location.pathname]);
 
@@ -62,7 +97,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   if (!session) return null;
 
-  const navSections = session.role === "admin" ? ADMIN_NAV : EMPLOYEE_NAV;
+  const navSections = buildNavSections(session);
   const pageTitle = getPageTitle(location.pathname);
   const isActive = (to: string, exact?: boolean) =>
     exact ? location.pathname === to || location.pathname === "/app/" : location.pathname === to || location.pathname.startsWith(to + "/");
@@ -90,7 +125,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <div className="space-y-0.5">
                 {sec.items.map((item) => {
                   const Icon = item.icon;
-                  const active = isActive(item.to, (item as any).exact);
+                  const active = isActive(item.to, item.exact);
                   const linkEl = (
                     <Link
                       key={item.to}

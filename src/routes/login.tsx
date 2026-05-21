@@ -34,7 +34,7 @@ function LoginPage() {
       toast.error("Invalid username or password");
       return;
     }
-    setSession({ id: employee.id, username: employee.username, name: employee.name, role: employee.role });
+    setSession({ id: employee.id, username: employee.username, name: employee.name, role: employee.role, permissions: employee.permissions });
     navigate({ to: "/app" });
   };
 

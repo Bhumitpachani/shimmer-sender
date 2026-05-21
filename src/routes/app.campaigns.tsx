@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { db } from "@/lib/db";
 import { Button } from "@/components/ui/button";
@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Progress } from "@/components/ui/progress";
-import { Send, Plus, CheckCircle2, XCircle, Globe, Calendar, Repeat2, ArrowRight, Eye } from "lucide-react";
+import { Send, Plus, Globe, Calendar, Repeat2, Eye } from "lucide-react";
 import { toast } from "sonner";
 import { getSession } from "@/lib/session";
 import { sendMail } from "@/lib/mailApi";
@@ -20,7 +20,15 @@ function cn(...cls: (string | boolean | undefined | null)[]) { return cls.filter
 
 function CampaignsPage() {
   const session = getSession();
-  const [campaigns, setCampaigns] = useState(() => db.campaigns.getAll());
+  const navigate = useNavigate();
+  const isEmployee = session?.role === "employee";
+
+  const allCampaigns = useMemo(() => {
+    const all = db.campaigns.getAll();
+    return isEmployee ? all.filter((c) => c.started_by === session?.username) : all;
+  }, [isEmployee, session?.username]);
+
+  const [campaigns, setCampaigns] = useState(() => allCampaigns);
   const [clients] = useState(() => db.clients.getAll());
   const [templates] = useState(() => db.templates.getAll());
   const [open, setOpen] = useState(false);
@@ -37,7 +45,11 @@ function CampaignsPage() {
   const [sending, setSending] = useState(false);
   const [progress, setProgress] = useState({ done: 0, total: 0, success: 0, fail: 0 });
 
-  const reload = () => setCampaigns(db.campaigns.getAll());
+  const reload = () => {
+    const all = db.campaigns.getAll();
+    setCampaigns(isEmployee ? all.filter((c) => c.started_by === session?.username) : all);
+  };
+
   const countries = useMemo(() => Array.from(new Set(clients.map((c) => c.country))).filter(Boolean).sort(), [clients]);
 
   const repeatIds = useMemo(() => {
@@ -95,7 +107,9 @@ function CampaignsPage() {
             <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Campaigns</h1>
             <span className="px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-600 text-xs font-semibold">{campaigns.length}</span>
           </div>
-          <p className="text-sm text-slate-500 mt-0.5">Send email blasts and track delivery results</p>
+          <p className="text-sm text-slate-500 mt-0.5">
+            {isEmployee ? "Your launched campaigns" : "Send email blasts and track delivery results"}
+          </p>
         </div>
         <Dialog open={open} onOpenChange={(v) => { if (!sending) { setOpen(v); if (!v) reset(); } }}>
           <DialogTrigger asChild>
@@ -173,7 +187,7 @@ function CampaignsPage() {
 
       {(templates.length === 0 || clients.length === 0) && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-          You need at least one <Link to="/app/templates" className="underline font-semibold">template</Link> and one <Link to="/app/clients" className="underline font-semibold">client</Link> before you can start a campaign.
+          You need at least one template and one client before you can start a campaign.
         </div>
       )}
 
@@ -186,6 +200,7 @@ function CampaignsPage() {
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider hidden sm:table-cell">Template</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider hidden md:table-cell">Filter</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider hidden sm:table-cell">Delivery</th>
+                {!isEmployee && <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider hidden md:table-cell">Started By</th>}
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Status</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider hidden lg:table-cell">Date</th>
                 <th className="px-4 py-3 text-right w-16"></th>
@@ -194,7 +209,7 @@ function CampaignsPage() {
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {campaigns.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-14 text-center">
+                  <td colSpan={!isEmployee ? 8 : 7} className="px-4 py-14 text-center">
                     <div className="flex flex-col items-center gap-2">
                       <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center">
                         <Send className="w-4 h-4 text-slate-400" />
@@ -209,10 +224,14 @@ function CampaignsPage() {
                 const total = c.total_recipients || 1;
                 const rate = Math.round((c.success_count / total) * 100);
                 return (
-                  <tr key={c.id} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/30 transition-colors">
+                  <tr
+                    key={c.id}
+                    className="hover:bg-slate-50/70 dark:hover:bg-slate-800/30 transition-colors cursor-pointer"
+                    onClick={() => navigate({ to: "/app/campaigns/$id", params: { id: c.id } })}
+                  >
                     <td className="px-4 py-3">
-                      <Link to="/app/campaigns/$id" params={{ id: c.id }} className="font-semibold text-slate-800 dark:text-white hover:text-primary transition-colors">{c.name}</Link>
-                      <div className="text-xs text-slate-400 mt-0.5">{c.total_recipients} recipients · by {c.started_by}</div>
+                      <div className="font-semibold text-slate-800 dark:text-white hover:text-primary transition-colors">{c.name}</div>
+                      <div className="text-xs text-slate-400 mt-0.5">{c.total_recipients} recipients</div>
                     </td>
                     <td className="px-4 py-3 hidden sm:table-cell text-slate-600 dark:text-slate-400 text-xs">{tpl?.name ?? "—"}</td>
                     <td className="px-4 py-3 hidden md:table-cell">
@@ -234,14 +253,20 @@ function CampaignsPage() {
                         </div>
                       </div>
                     </td>
+                    {!isEmployee && (
+                      <td className="px-4 py-3 hidden md:table-cell">
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600">{c.started_by}</span>
+                      </td>
+                    )}
                     <td className="px-4 py-3"><StatusBadge status={c.status} /></td>
                     <td className="px-4 py-3 hidden lg:table-cell text-slate-400 text-xs">{new Date(c.created_at).toLocaleString()}</td>
-                    <td className="px-4 py-3 text-right">
-                      <Link to="/app/campaigns/$id" params={{ id: c.id }}>
-                        <button className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors text-slate-400 hover:text-primary">
-                          <Eye className="w-4 h-4" />
-                        </button>
-                      </Link>
+                    <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        onClick={() => navigate({ to: "/app/campaigns/$id", params: { id: c.id } })}
+                        className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors text-slate-400 hover:text-primary"
+                      >
+                        <Eye className="w-4 h-4" />
+                      </button>
                     </td>
                   </tr>
                 );
