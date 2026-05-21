@@ -1,8 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { useState } from "react";
+import { db } from "@/lib/db";
 import { Card } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { ArrowLeft, CheckCircle2, XCircle } from "lucide-react";
 
 export const Route = createFileRoute("/app/clients/$id")({
@@ -11,28 +10,22 @@ export const Route = createFileRoute("/app/clients/$id")({
 
 function ClientDetail() {
   const { id } = Route.useParams();
-  const [client, setClient] = useState<any>(null);
-  const [history, setHistory] = useState<any[]>([]);
+  const [client] = useState(() => db.clients.getById(id));
+  const [history] = useState(() => db.sendHistory.getByClientId(id));
 
-  useEffect(() => {
-    (async () => {
-      const { data: c } = await supabase.from("clients").select("*").eq("id", id).maybeSingle();
-      setClient(c);
-      const { data: h } = await supabase
-        .from("send_history")
-        .select("*")
-        .eq("client_id", id)
-        .order("sent_at", { ascending: false });
-      setHistory(h ?? []);
-    })();
-  }, [id]);
-
-  if (!client) return <div className="text-sm text-muted-foreground">Loading...</div>;
+  if (!client) return (
+    <div className="space-y-4">
+      <Link to="/app/clients" className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground">
+        <ArrowLeft className="w-4 h-4 mr-1" /> Back to clients
+      </Link>
+      <p className="text-sm text-muted-foreground">Client not found.</p>
+    </div>
+  );
 
   return (
     <div className="space-y-5">
-      <Link to="/app/clients" className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground">
-        <ArrowLeft className="w-4 h-4 mr-1" /> Back to clients
+      <Link to="/app/clients" className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground gap-1">
+        <ArrowLeft className="w-4 h-4" /> Back to clients
       </Link>
       <Card className="p-6">
         <h1 className="text-2xl font-bold">{client.name}</h1>
@@ -40,6 +33,8 @@ function ClientDetail() {
           <Field label="Email" value={client.email} />
           <Field label="Mobile" value={client.mobile} />
           <Field label="Country" value={client.country} />
+          <Field label="State / City" value={client.state ?? "—"} />
+          <Field label="Website" value={client.website ?? "—"} />
           <Field label="Company" value={client.company ?? "—"} />
           <Field label="Added by" value={client.added_by} />
           <Field label="Created" value={new Date(client.created_at).toLocaleString()} />
@@ -52,29 +47,29 @@ function ClientDetail() {
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-muted">
+              <thead className="bg-muted/60 border-b">
                 <tr className="text-left">
-                  <th className="px-3 py-2">Date</th>
-                  <th className="px-3 py-2">Template</th>
-                  <th className="px-3 py-2">Status</th>
-                  <th className="px-3 py-2">Sent by</th>
-                  <th className="px-3 py-2">Error</th>
+                  <th className="px-3 py-2 font-semibold text-xs uppercase tracking-wider text-muted-foreground">Date</th>
+                  <th className="px-3 py-2 font-semibold text-xs uppercase tracking-wider text-muted-foreground">Template</th>
+                  <th className="px-3 py-2 font-semibold text-xs uppercase tracking-wider text-muted-foreground">Status</th>
+                  <th className="px-3 py-2 font-semibold text-xs uppercase tracking-wider text-muted-foreground hidden sm:table-cell">Sent by</th>
+                  <th className="px-3 py-2 font-semibold text-xs uppercase tracking-wider text-muted-foreground hidden md:table-cell">Error</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
                 {history.map((h) => (
-                  <tr key={h.id}>
-                    <td className="px-3 py-2">{new Date(h.sent_at).toLocaleString()}</td>
+                  <tr key={h.id} className="hover:bg-muted/30 transition-colors">
+                    <td className="px-3 py-2 text-muted-foreground text-xs">{new Date(h.sent_at).toLocaleString()}</td>
                     <td className="px-3 py-2">{h.template_name ?? "—"}</td>
                     <td className="px-3 py-2">
                       {h.status === "success" ? (
-                        <span className="inline-flex items-center gap-1 text-success"><CheckCircle2 className="w-3 h-3" /> Success</span>
+                        <span className="inline-flex items-center gap-1 text-green-600 text-xs font-medium"><CheckCircle2 className="w-3 h-3" /> Success</span>
                       ) : (
-                        <span className="inline-flex items-center gap-1 text-destructive"><XCircle className="w-3 h-3" /> Failed</span>
+                        <span className="inline-flex items-center gap-1 text-destructive text-xs font-medium"><XCircle className="w-3 h-3" /> Failed</span>
                       )}
                     </td>
-                    <td className="px-3 py-2">{h.sent_by}</td>
-                    <td className="px-3 py-2 text-xs text-muted-foreground max-w-xs truncate" title={h.error ?? ""}>{h.error ?? "—"}</td>
+                    <td className="px-3 py-2 hidden sm:table-cell text-muted-foreground text-xs">{h.sent_by}</td>
+                    <td className="px-3 py-2 hidden md:table-cell text-xs text-muted-foreground max-w-xs truncate" title={h.error ?? ""}>{h.error ?? "—"}</td>
                   </tr>
                 ))}
               </tbody>
@@ -89,7 +84,7 @@ function ClientDetail() {
 function Field({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <div className="text-xs text-muted-foreground uppercase">{label}</div>
+      <div className="text-xs text-muted-foreground uppercase tracking-wider mb-0.5">{label}</div>
       <div className="font-medium">{value}</div>
     </div>
   );

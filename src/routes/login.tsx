@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { db } from "@/lib/db";
 import { setSession, getSession } from "@/lib/session";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -27,24 +27,19 @@ function LoginPage() {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    const { data, error } = await supabase
-      .from("employees")
-      .select("*")
-      .eq("username", username.trim())
-      .eq("password", password)
-      .maybeSingle();
+    const employee = db.employees.getByUsername(username.trim());
     setLoading(false);
-    if (error || !data) {
+    if (!employee || employee.password !== password) {
       toast.error("Invalid username or password");
       return;
     }
     setSession({
-      id: data.id,
-      username: data.username,
-      name: data.name,
-      role: data.role as "admin" | "employee",
+      id: employee.id,
+      username: employee.username,
+      name: employee.name,
+      role: employee.role,
     });
-    toast.success(`Welcome ${data.name}`);
+    toast.success(`Welcome ${employee.name}`);
     navigate({ to: "/app" });
   };
 
@@ -68,7 +63,7 @@ function LoginPage() {
             <Input id="p" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
           </div>
           <Button type="submit" className="w-full" disabled={loading}>
-            {loading ? "Signing in..." : "Sign In"}
+            {loading ? "Signing in…" : "Sign In"}
           </Button>
           <p className="text-xs text-muted-foreground text-center pt-2">
             Default admin: <span className="font-mono">admin / 123</span>

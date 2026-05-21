@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { db } from "@/lib/db";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,7 +26,7 @@ const SAMPLE_HTML = `<div style="font-family: Arial, sans-serif; max-width:600px
 function TemplatesPage() {
   const session = getSession();
   const navigate = useNavigate();
-  const [templates, setTemplates] = useState<any[]>([]);
+  const [templates, setTemplates] = useState(() => db.templates.getAll());
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<any>(null);
   const [form, setForm] = useState({ name: "", subject: "", html: SAMPLE_HTML });
@@ -35,11 +35,7 @@ function TemplatesPage() {
     if (session && session.role !== "admin") navigate({ to: "/app/clients" });
   }, [session, navigate]);
 
-  const load = async () => {
-    const { data } = await supabase.from("templates").select("*").order("created_at", { ascending: false });
-    setTemplates(data ?? []);
-  };
-  useEffect(() => { load(); }, []);
+  const load = () => setTemplates(db.templates.getAll());
 
   const startEdit = (t: any) => {
     setEditing(t);
@@ -52,31 +48,26 @@ function TemplatesPage() {
     setOpen(true);
   };
 
-  const handleSave = async (e: React.FormEvent) => {
+  const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
     if (editing) {
-      const { error } = await supabase.from("templates").update({
-        name: form.name, subject: form.subject, html: form.html,
-      }).eq("id", editing.id);
-      if (error) return toast.error(error.message);
+      const { error } = db.templates.update(editing.id, { name: form.name, subject: form.subject, html: form.html });
+      if (error) return toast.error(error);
       toast.success("Template updated");
     } else {
-      const { error } = await supabase.from("templates").insert({
-        name: form.name, subject: form.subject, html: form.html,
-        created_by: session?.username ?? "admin",
-      });
-      if (error) return toast.error(error.message);
+      const { error } = db.templates.insert({ name: form.name, subject: form.subject, html: form.html, created_by: session?.username ?? "admin" });
+      if (error) return toast.error(error);
       toast.success("Template created");
     }
     setOpen(false);
     load();
   };
 
-  const handleDelete = async (id: string) => {
+  const handleDelete = (id: string) => {
     if (!confirm("Delete this template?")) return;
-    const { error } = await supabase.from("templates").delete().eq("id", id);
-    if (error) toast.error(error.message);
-    else { toast.success("Deleted"); load(); }
+    db.templates.delete(id);
+    toast.success("Deleted");
+    load();
   };
 
   if (!session || session.role !== "admin") return null;
@@ -102,7 +93,7 @@ function TemplatesPage() {
               <div className="font-semibold">{t.name}</div>
               <div className="text-xs text-muted-foreground mt-0.5 truncate">{t.subject}</div>
             </div>
-            <div className="border-t bg-white dark:bg-white overflow-hidden flex-1 min-h-[130px] max-h-[180px]">
+            <div className="border-t bg-white dark:bg-white overflow-hidden min-h-[130px] max-h-[180px]">
               <iframe srcDoc={t.html} className="w-full h-44" sandbox="" title={t.name} />
             </div>
             <div className="p-3 pt-2 flex items-center justify-between">

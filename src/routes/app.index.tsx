@@ -1,6 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { db } from "@/lib/db";
 import { Card } from "@/components/ui/card";
 import { Users, Mail, Send, CheckCircle2, XCircle, TrendingUp } from "lucide-react";
 import { getSession } from "@/lib/session";
@@ -21,24 +21,14 @@ function Dashboard() {
   const [recent, setRecent] = useState<any[]>([]);
 
   useEffect(() => {
-    (async () => {
-      const [c, t, cm, hSuccess, hFail, rec] = await Promise.all([
-        supabase.from("clients").select("*", { count: "exact", head: true }),
-        supabase.from("templates").select("*", { count: "exact", head: true }),
-        supabase.from("campaigns").select("*", { count: "exact", head: true }),
-        supabase.from("send_history").select("*", { count: "exact", head: true }).eq("status", "success"),
-        supabase.from("send_history").select("*", { count: "exact", head: true }).eq("status", "fail"),
-        supabase.from("campaigns").select("*").order("created_at", { ascending: false }).limit(5),
-      ]);
-      setStats({
-        clients: c.count ?? 0,
-        templates: t.count ?? 0,
-        campaigns: cm.count ?? 0,
-        success: hSuccess.count ?? 0,
-        fail: hFail.count ?? 0,
-      });
-      setRecent(rec.data ?? []);
-    })();
+    setStats({
+      clients: db.clients.getAll().length,
+      templates: db.templates.getAll().length,
+      campaigns: db.campaigns.getAll().length,
+      success: db.sendHistory.countByStatus("success"),
+      fail: db.sendHistory.countByStatus("fail"),
+    });
+    setRecent(db.campaigns.getAll().slice(0, 5));
   }, []);
 
   if (session?.role === "employee") return null;

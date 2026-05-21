@@ -9,7 +9,7 @@ const KEY = "sj_session";
 
 export function getSession(): Session | null {
   if (typeof window === "undefined") return null;
-  const raw = sessionStorage.getItem(KEY);
+  const raw = localStorage.getItem(KEY);
   if (!raw) return null;
   try {
     return JSON.parse(raw) as Session;
@@ -19,9 +19,9 @@ export function getSession(): Session | null {
 }
 
 export function setSession(s: Session) {
-  sessionStorage.setItem(KEY, JSON.stringify(s));
+  localStorage.setItem(KEY, JSON.stringify(s));
 }
 
 export function clearSession() {
-  sessionStorage.removeItem(KEY);
+  localStorage.removeItem(KEY);
 }

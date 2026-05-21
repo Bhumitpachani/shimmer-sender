@@ -1,6 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { useMemo, useState } from "react";
+import { db } from "@/lib/db";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,8 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Progress } from "@/components/ui/progress";
-import { Badge } from "@/components/ui/badge";
-import { Send, Plus, CheckCircle2, XCircle, Globe, Calendar, Repeat2, ChevronDown, ChevronUp } from "lucide-react";
+import { Send, Plus, CheckCircle2, XCircle, Globe, Calendar, Repeat2 } from "lucide-react";
 import { toast } from "sonner";
 import { getSession } from "@/lib/session";
 import { sendMail } from "@/lib/mailApi";
@@ -21,9 +20,10 @@ export const Route = createFileRoute("/app/campaigns")({
 function CampaignsPage() {
   const session = getSession();
   const navigate = useNavigate();
-  const [campaigns, setCampaigns] = useState<any[]>([]);
-  const [clients, setClients] = useState<any[]>([]);
-  const [templates, setTemplates] = useState<any[]>([]);
+
+  const [campaigns, setCampaigns] = useState(() => db.campaigns.getAll());
+  const [clients] = useState(() => db.clients.getAll());
+  const [templates] = useState(() => db.templates.getAll());
   const [open, setOpen] = useState(false);
 
   const [name, setName] = useState("");
@@ -36,41 +36,20 @@ function CampaignsPage() {
   const [dateTo, setDateTo] = useState("");
   const [useRepeat, setUseRepeat] = useState(false);
   const [repeatCampaignId, setRepeatCampaignId] = useState("");
-  const [repeatClientIds, setRepeatClientIds] = useState<Set<string>>(new Set());
 
   const [sending, setSending] = useState(false);
   const [progress, setProgress] = useState({ done: 0, total: 0, success: 0, fail: 0 });
 
-  const load = async () => {
-    const [cms, cls, tps] = await Promise.all([
-      supabase.from("campaigns").select("*, templates(name)").order("created_at", { ascending: false }),
-      supabase.from("clients").select("*"),
-      supabase.from("templates").select("*"),
-    ]);
-    setCampaigns(cms.data ?? []);
-    setClients(cls.data ?? []);
-    setTemplates(tps.data ?? []);
-  };
-  useEffect(() => { load(); }, []);
+  const reload = () => setCampaigns(db.campaigns.getAll());
 
   const countries = useMemo(
     () => Array.from(new Set(clients.map((c) => c.country))).filter(Boolean).sort(),
     [clients]
   );
 
-  useEffect(() => {
-    if (!useRepeat || !repeatCampaignId) {
-      setRepeatClientIds(new Set());
-      return;
-    }
-    supabase
-      .from("send_history")
-      .select("client_id")
-      .eq("campaign_id", repeatCampaignId)
-      .then(({ data }) => {
-        const ids = new Set((data ?? []).map((r: any) => r.client_id).filter(Boolean) as string[]);
-        setRepeatClientIds(ids);
-      });
+  const repeatClientIds = useMemo(() => {
+    if (!useRepeat || !repeatCampaignId) return new Set<string>();
+    return db.sendHistory.getClientIdsByCampaignId(repeatCampaignId);
   }, [useRepeat, repeatCampaignId]);
 
   const targets = useMemo(() => {
@@ -87,7 +66,7 @@ function CampaignsPage() {
     setName(""); setTemplateId("");
     setUseCountry(false); setCountry("");
     setUseDate(false); setDateFrom(""); setDateTo("");
-    setUseRepeat(false); setRepeatCampaignId(""); setRepeatClientIds(new Set());
+    setUseRepeat(false); setRepeatCampaignId("");
   };
 
   const startCampaign = async (e: React.FormEvent) => {
@@ -98,34 +77,36 @@ function CampaignsPage() {
 
     const filterDesc = [
       useCountry && country ? `Country: ${country}` : null,
-      useDate && (dateFrom || dateTo) ? `Date range applied` : null,
-      useRepeat && repeatCampaignId ? `Repeat from previous campaign` : null,
-    ].filter(Boolean).join(" • ") || "All clients";
+      useDate && (dateFrom || dateTo) ? "Date range applied" : null,
+      useRepeat && repeatCampaignId ? "Repeat from previous campaign" : null,
+    ].filter(Boolean).join(" · ") || "All clients";
 
     if (!confirm(`Send "${tpl.name}" to ${targets.length} client(s)?\n${filterDesc}`)) return;
 
     setSending(true);
     setProgress({ done: 0, total: targets.length, success: 0, fail: 0 });
 
-    const { data: campaign, error: cErr } = await supabase.from("campaigns").insert({
+    const { id: campaignId, error: cErr } = db.campaigns.insert({
       name,
       country: useCountry && country ? country : null,
       template_id: tpl.id,
       date_from: useDate && dateFrom ? dateFrom : null,
       date_to: useDate && dateTo ? dateTo : null,
       total_recipients: targets.length,
+      success_count: 0,
+      fail_count: 0,
       status: "running",
       started_by: session?.username ?? "admin",
-    }).select().single();
-    if (cErr || !campaign) { setSending(false); return toast.error(cErr?.message ?? "Failed"); }
+    });
+    if (cErr) { setSending(false); return toast.error(cErr); }
 
     let success = 0, fail = 0;
     for (let i = 0; i < targets.length; i++) {
       const c = targets[i];
       const res = await sendMail({ to: c.email, subject: tpl.subject, html: tpl.html });
       if (res.ok) success++; else fail++;
-      await supabase.from("send_history").insert({
-        campaign_id: campaign.id,
+      db.sendHistory.insert({
+        campaign_id: campaignId,
         client_id: c.id,
         client_email: c.email,
         template_id: tpl.id,
@@ -137,18 +118,18 @@ function CampaignsPage() {
       setProgress({ done: i + 1, total: targets.length, success, fail });
     }
 
-    await supabase.from("campaigns").update({
+    db.campaigns.update(campaignId, {
       success_count: success,
       fail_count: fail,
       status: fail === targets.length ? "failed" : "completed",
-    }).eq("id", campaign.id);
+    });
 
     setSending(false);
     toast.success(`Done: ${success} sent, ${fail} failed`);
     setOpen(false);
     resetForm();
-    load();
-    navigate({ to: "/app/campaigns/$id", params: { id: campaign.id } });
+    reload();
+    navigate({ to: "/app/campaigns/$id", params: { id: campaignId } });
   };
 
   return (
@@ -181,19 +162,12 @@ function CampaignsPage() {
                 </Select>
               </div>
 
-              {/* Optional Filters */}
               <div className="space-y-2">
                 <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Optional Filters</div>
 
-                {/* Country Filter */}
                 <div className={`rounded-lg border p-3 transition-colors ${useCountry ? "bg-primary/5 border-primary/30" : "bg-muted/30"}`}>
                   <label className="flex items-center gap-2.5 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={useCountry}
-                      onChange={(e) => { setUseCountry(e.target.checked); if (!e.target.checked) setCountry(""); }}
-                      className="rounded accent-primary w-4 h-4"
-                    />
+                    <input type="checkbox" checked={useCountry} onChange={(e) => { setUseCountry(e.target.checked); if (!e.target.checked) setCountry(""); }} className="rounded accent-primary w-4 h-4" />
                     <Globe className="w-4 h-4 text-primary" />
                     <span className="text-sm font-medium">Filter by Country</span>
                   </label>
@@ -209,15 +183,9 @@ function CampaignsPage() {
                   )}
                 </div>
 
-                {/* Date Filter */}
                 <div className={`rounded-lg border p-3 transition-colors ${useDate ? "bg-primary/5 border-primary/30" : "bg-muted/30"}`}>
                   <label className="flex items-center gap-2.5 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={useDate}
-                      onChange={(e) => { setUseDate(e.target.checked); if (!e.target.checked) { setDateFrom(""); setDateTo(""); } }}
-                      className="rounded accent-primary w-4 h-4"
-                    />
+                    <input type="checkbox" checked={useDate} onChange={(e) => { setUseDate(e.target.checked); if (!e.target.checked) { setDateFrom(""); setDateTo(""); } }} className="rounded accent-primary w-4 h-4" />
                     <Calendar className="w-4 h-4 text-primary" />
                     <span className="text-sm font-medium">Filter by Date Added</span>
                   </label>
@@ -235,15 +203,9 @@ function CampaignsPage() {
                   )}
                 </div>
 
-                {/* Repeat Campaign Filter */}
                 <div className={`rounded-lg border p-3 transition-colors ${useRepeat ? "bg-primary/5 border-primary/30" : "bg-muted/30"}`}>
                   <label className="flex items-center gap-2.5 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={useRepeat}
-                      onChange={(e) => { setUseRepeat(e.target.checked); if (!e.target.checked) { setRepeatCampaignId(""); setRepeatClientIds(new Set()); } }}
-                      className="rounded accent-primary w-4 h-4"
-                    />
+                    <input type="checkbox" checked={useRepeat} onChange={(e) => { setUseRepeat(e.target.checked); if (!e.target.checked) setRepeatCampaignId(""); }} className="rounded accent-primary w-4 h-4" />
                     <Repeat2 className="w-4 h-4 text-primary" />
                     <span className="text-sm font-medium">Repeat from Previous Campaign</span>
                   </label>
@@ -265,12 +227,10 @@ function CampaignsPage() {
                 </div>
               </div>
 
-              {/* Target count */}
               <Card className={`p-3 text-sm font-medium ${targets.length === 0 ? "bg-destructive/10 text-destructive" : "bg-primary/8 text-primary"}`}>
                 <span className="text-lg font-bold">{targets.length}</span> client(s) will receive this email.
               </Card>
 
-              {/* Progress */}
               {sending && (
                 <div className="space-y-2">
                   <Progress value={(progress.done / Math.max(progress.total, 1)) * 100} />
@@ -296,11 +256,7 @@ function CampaignsPage() {
 
       {(templates.length === 0 || clients.length === 0) && (
         <Card className="p-4 bg-amber-50 dark:bg-amber-950/20 border-amber-200 dark:border-amber-800 text-sm text-amber-800 dark:text-amber-300">
-          You need at least one{" "}
-          <Link to="/app/templates" className="underline font-medium">template</Link>{" "}
-          and one{" "}
-          <Link to="/app/clients" className="underline font-medium">client</Link>{" "}
-          to start a campaign.
+          You need at least one <Link to="/app/templates" className="underline font-medium">template</Link> and one <Link to="/app/clients" className="underline font-medium">client</Link> to start a campaign.
         </Card>
       )}
 
@@ -322,32 +278,33 @@ function CampaignsPage() {
             <tbody className="divide-y">
               {campaigns.length === 0 ? (
                 <tr><td colSpan={8} className="px-4 py-10 text-center text-muted-foreground">No campaigns yet</td></tr>
-              ) : campaigns.map((c) => (
-                <tr key={c.id} className="hover:bg-muted/30 transition-colors">
-                  <td className="px-4 py-2.5">
-                    <Link to="/app/campaigns/$id" params={{ id: c.id }} className="text-primary hover:underline font-medium">{c.name}</Link>
-                  </td>
-                  <td className="px-4 py-2.5 hidden sm:table-cell">
-                    {c.country ? (
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-primary/8 text-primary font-medium">{c.country}</span>
-                    ) : (
-                      <span className="text-xs text-muted-foreground">All</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-2.5 hidden md:table-cell text-muted-foreground">{c.templates?.name ?? "—"}</td>
-                  <td className="px-4 py-2.5 hidden sm:table-cell font-medium">{c.total_recipients}</td>
-                  <td className="px-4 py-2.5">
-                    <div className="flex items-center gap-1.5 text-xs">
-                      <span className="inline-flex items-center gap-0.5 text-green-600 font-semibold"><CheckCircle2 className="w-3 h-3" />{c.success_count}</span>
-                      <span className="text-muted-foreground">/</span>
-                      <span className="inline-flex items-center gap-0.5 text-destructive font-semibold"><XCircle className="w-3 h-3" />{c.fail_count}</span>
-                    </div>
-                  </td>
-                  <td className="px-4 py-2.5"><StatusBadge status={c.status} /></td>
-                  <td className="px-4 py-2.5 hidden lg:table-cell text-muted-foreground text-xs">{c.started_by}</td>
-                  <td className="px-4 py-2.5 hidden md:table-cell text-muted-foreground text-xs">{new Date(c.created_at).toLocaleString()}</td>
-                </tr>
-              ))}
+              ) : campaigns.map((c) => {
+                const tpl = templates.find((t) => t.id === c.template_id);
+                return (
+                  <tr key={c.id} className="hover:bg-muted/30 transition-colors">
+                    <td className="px-4 py-2.5">
+                      <Link to="/app/campaigns/$id" params={{ id: c.id }} className="text-primary hover:underline font-medium">{c.name}</Link>
+                    </td>
+                    <td className="px-4 py-2.5 hidden sm:table-cell">
+                      {c.country
+                        ? <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-primary/8 text-primary font-medium">{c.country}</span>
+                        : <span className="text-xs text-muted-foreground">All</span>}
+                    </td>
+                    <td className="px-4 py-2.5 hidden md:table-cell text-muted-foreground">{tpl?.name ?? "—"}</td>
+                    <td className="px-4 py-2.5 hidden sm:table-cell font-medium">{c.total_recipients}</td>
+                    <td className="px-4 py-2.5">
+                      <div className="flex items-center gap-1.5 text-xs">
+                        <span className="inline-flex items-center gap-0.5 text-green-600 font-semibold"><CheckCircle2 className="w-3 h-3" />{c.success_count}</span>
+                        <span className="text-muted-foreground">/</span>
+                        <span className="inline-flex items-center gap-0.5 text-destructive font-semibold"><XCircle className="w-3 h-3" />{c.fail_count}</span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-2.5"><StatusBadge status={c.status} /></td>
+                    <td className="px-4 py-2.5 hidden lg:table-cell text-muted-foreground text-xs">{c.started_by}</td>
+                    <td className="px-4 py-2.5 hidden md:table-cell text-muted-foreground text-xs">{new Date(c.created_at).toLocaleString()}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
