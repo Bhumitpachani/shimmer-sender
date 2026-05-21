@@ -76,8 +76,13 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { title: "Starlink Jewels — Email Marketing" },
       { name: "description", content: "Email marketing dashboard for Starlink Jewels: manage clients, templates, and campaigns." },
       { property: "og:title", content: "Starlink Jewels — Email Marketing" },
-      { property: "og:description", content: "Manage clients, templates, and campaigns." },
+      { property: "og:description", content: "Email marketing dashboard for Starlink Jewels: manage clients, templates, and campaigns." },
       { property: "og:type", content: "website" },
+      { name: "twitter:title", content: "Starlink Jewels — Email Marketing" },
+      { name: "twitter:description", content: "Email marketing dashboard for Starlink Jewels: manage clients, templates, and campaigns." },
+      { property: "og:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/ae9d6861-6122-4690-b3b5-00f9efc04a53/id-preview-2efc68c5--6fe1c2d7-20c7-4678-bca5-841052ccc123.lovable.app-1779340857315.png" },
+      { name: "twitter:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/ae9d6861-6122-4690-b3b5-00f9efc04a53/id-preview-2efc68c5--6fe1c2d7-20c7-4678-bca5-841052ccc123.lovable.app-1779340857315.png" },
+      { name: "twitter:card", content: "summary_large_image" },
     ],
     links: [
       {
