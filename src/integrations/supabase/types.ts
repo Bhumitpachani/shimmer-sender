@@ -14,7 +14,207 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      campaigns: {
+        Row: {
+          country: string
+          created_at: string
+          date_from: string | null
+          date_to: string | null
+          fail_count: number
+          id: string
+          name: string
+          started_by: string
+          status: string
+          success_count: number
+          template_id: string
+          total_recipients: number
+        }
+        Insert: {
+          country: string
+          created_at?: string
+          date_from?: string | null
+          date_to?: string | null
+          fail_count?: number
+          id?: string
+          name: string
+          started_by: string
+          status?: string
+          success_count?: number
+          template_id: string
+          total_recipients?: number
+        }
+        Update: {
+          country?: string
+          created_at?: string
+          date_from?: string | null
+          date_to?: string | null
+          fail_count?: number
+          id?: string
+          name?: string
+          started_by?: string
+          status?: string
+          success_count?: number
+          template_id?: string
+          total_recipients?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "campaigns_template_id_fkey"
+            columns: ["template_id"]
+            isOneToOne: false
+            referencedRelation: "templates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      clients: {
+        Row: {
+          added_by: string
+          company: string | null
+          country: string
+          created_at: string
+          email: string
+          id: string
+          mobile: string
+          name: string
+        }
+        Insert: {
+          added_by?: string
+          company?: string | null
+          country: string
+          created_at?: string
+          email: string
+          id?: string
+          mobile: string
+          name: string
+        }
+        Update: {
+          added_by?: string
+          company?: string | null
+          country?: string
+          created_at?: string
+          email?: string
+          id?: string
+          mobile?: string
+          name?: string
+        }
+        Relationships: []
+      }
+      employees: {
+        Row: {
+          created_at: string
+          id: string
+          name: string
+          password: string
+          role: string
+          username: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          name: string
+          password: string
+          role?: string
+          username: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          name?: string
+          password?: string
+          role?: string
+          username?: string
+        }
+        Relationships: []
+      }
+      send_history: {
+        Row: {
+          campaign_id: string | null
+          client_email: string
+          client_id: string | null
+          error: string | null
+          id: string
+          sent_at: string
+          sent_by: string
+          status: string
+          template_id: string | null
+          template_name: string | null
+        }
+        Insert: {
+          campaign_id?: string | null
+          client_email: string
+          client_id?: string | null
+          error?: string | null
+          id?: string
+          sent_at?: string
+          sent_by: string
+          status: string
+          template_id?: string | null
+          template_name?: string | null
+        }
+        Update: {
+          campaign_id?: string | null
+          client_email?: string
+          client_id?: string | null
+          error?: string | null
+          id?: string
+          sent_at?: string
+          sent_by?: string
+          status?: string
+          template_id?: string | null
+          template_name?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "send_history_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "campaigns"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "send_history_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "send_history_template_id_fkey"
+            columns: ["template_id"]
+            isOneToOne: false
+            referencedRelation: "templates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      templates: {
+        Row: {
+          created_at: string
+          created_by: string
+          html: string
+          id: string
+          name: string
+          subject: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string
+          html: string
+          id?: string
+          name: string
+          subject: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string
+          html?: string
+          id?: string
+          name?: string
+          subject?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
