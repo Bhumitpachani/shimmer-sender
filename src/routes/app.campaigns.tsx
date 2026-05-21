@@ -8,7 +8,8 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Progress } from "@/components/ui/progress";
-import { Send, Plus, CheckCircle2, XCircle } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Send, Plus, CheckCircle2, XCircle, Globe, Calendar, Repeat2, ChevronDown, ChevronUp } from "lucide-react";
 import { toast } from "sonner";
 import { getSession } from "@/lib/session";
 import { sendMail } from "@/lib/mailApi";
@@ -24,11 +25,19 @@ function CampaignsPage() {
   const [clients, setClients] = useState<any[]>([]);
   const [templates, setTemplates] = useState<any[]>([]);
   const [open, setOpen] = useState(false);
+
   const [name, setName] = useState("");
-  const [country, setCountry] = useState("");
   const [templateId, setTemplateId] = useState("");
+
+  const [useCountry, setUseCountry] = useState(false);
+  const [country, setCountry] = useState("");
+  const [useDate, setUseDate] = useState(false);
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [useRepeat, setUseRepeat] = useState(false);
+  const [repeatCampaignId, setRepeatCampaignId] = useState("");
+  const [repeatClientIds, setRepeatClientIds] = useState<Set<string>>(new Set());
+
   const [sending, setSending] = useState(false);
   const [progress, setProgress] = useState({ done: 0, total: 0, success: 0, fail: 0 });
 
@@ -49,31 +58,61 @@ function CampaignsPage() {
     [clients]
   );
 
+  useEffect(() => {
+    if (!useRepeat || !repeatCampaignId) {
+      setRepeatClientIds(new Set());
+      return;
+    }
+    supabase
+      .from("send_history")
+      .select("client_id")
+      .eq("campaign_id", repeatCampaignId)
+      .then(({ data }) => {
+        const ids = new Set((data ?? []).map((r: any) => r.client_id).filter(Boolean) as string[]);
+        setRepeatClientIds(ids);
+      });
+  }, [useRepeat, repeatCampaignId]);
+
   const targets = useMemo(() => {
     return clients.filter((c) => {
-      if (country && c.country !== country) return false;
-      if (dateFrom && new Date(c.created_at) < new Date(dateFrom)) return false;
-      if (dateTo && new Date(c.created_at) > new Date(dateTo + "T23:59:59")) return false;
+      if (useCountry && country && c.country !== country) return false;
+      if (useDate && dateFrom && new Date(c.created_at) < new Date(dateFrom)) return false;
+      if (useDate && dateTo && new Date(c.created_at) > new Date(dateTo + "T23:59:59")) return false;
+      if (useRepeat && repeatCampaignId && repeatClientIds.size > 0 && !repeatClientIds.has(c.id)) return false;
       return true;
     });
-  }, [clients, country, dateFrom, dateTo]);
+  }, [clients, useCountry, country, useDate, dateFrom, dateTo, useRepeat, repeatCampaignId, repeatClientIds]);
+
+  const resetForm = () => {
+    setName(""); setTemplateId("");
+    setUseCountry(false); setCountry("");
+    setUseDate(false); setDateFrom(""); setDateTo("");
+    setUseRepeat(false); setRepeatCampaignId(""); setRepeatClientIds(new Set());
+  };
 
   const startCampaign = async (e: React.FormEvent) => {
     e.preventDefault();
     const tpl = templates.find((t) => t.id === templateId);
     if (!tpl) return toast.error("Pick a template");
     if (targets.length === 0) return toast.error("No clients match these filters");
-    if (!confirm(`Send "${tpl.name}" to ${targets.length} client(s) in ${country}?`)) return;
+
+    const filterDesc = [
+      useCountry && country ? `Country: ${country}` : null,
+      useDate && (dateFrom || dateTo) ? `Date range applied` : null,
+      useRepeat && repeatCampaignId ? `Repeat from previous campaign` : null,
+    ].filter(Boolean).join(" • ") || "All clients";
+
+    if (!confirm(`Send "${tpl.name}" to ${targets.length} client(s)?\n${filterDesc}`)) return;
 
     setSending(true);
     setProgress({ done: 0, total: targets.length, success: 0, fail: 0 });
 
     const { data: campaign, error: cErr } = await supabase.from("campaigns").insert({
       name,
-      country,
+      country: useCountry && country ? country : null,
       template_id: tpl.id,
-      date_from: dateFrom || null,
-      date_to: dateTo || null,
+      date_from: useDate && dateFrom ? dateFrom : null,
+      date_to: useDate && dateTo ? dateTo : null,
       total_recipients: targets.length,
       status: "running",
       started_by: session?.username ?? "admin",
@@ -107,39 +146,33 @@ function CampaignsPage() {
     setSending(false);
     toast.success(`Done: ${success} sent, ${fail} failed`);
     setOpen(false);
-    setName(""); setCountry(""); setTemplateId(""); setDateFrom(""); setDateTo("");
+    resetForm();
     load();
     navigate({ to: "/app/campaigns/$id", params: { id: campaign.id } });
   };
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-end gap-3">
         <div>
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Campaigns</h1>
           <p className="text-sm text-muted-foreground">Send email blasts and track results</p>
         </div>
-        <Dialog open={open} onOpenChange={(v) => { if (!sending) setOpen(v); }}>
+        <Dialog open={open} onOpenChange={(v) => { if (!sending) { setOpen(v); if (!v) resetForm(); } }}>
           <DialogTrigger asChild>
-            <Button disabled={templates.length === 0 || clients.length === 0}><Plus className="w-4 h-4 mr-2" />New Campaign</Button>
+            <Button size="sm" disabled={templates.length === 0 || clients.length === 0}>
+              <Plus className="w-4 h-4 mr-1.5" />New Campaign
+            </Button>
           </DialogTrigger>
-          <DialogContent className="max-w-lg">
+          <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
             <DialogHeader><DialogTitle>Start a Campaign</DialogTitle></DialogHeader>
-            <form onSubmit={startCampaign} className="space-y-3">
-              <div><Label>Campaign Name *</Label><Input required value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Diwali Promo Oct" /></div>
-              <div><Label>Country *</Label>
-                <Select value={country} onValueChange={setCountry} required>
-                  <SelectTrigger><SelectValue placeholder="Choose country" /></SelectTrigger>
-                  <SelectContent>
-                    {countries.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
-                  </SelectContent>
-                </Select>
+            <form onSubmit={startCampaign} className="space-y-4">
+              <div>
+                <Label>Campaign Name *</Label>
+                <Input required value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Diwali Promo Oct" />
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div><Label>Clients added from</Label><Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} /></div>
-                <div><Label>To</Label><Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} /></div>
-              </div>
-              <div><Label>Template *</Label>
+              <div>
+                <Label>Template *</Label>
                 <Select value={templateId} onValueChange={setTemplateId} required>
                   <SelectTrigger><SelectValue placeholder="Choose template" /></SelectTrigger>
                   <SelectContent>
@@ -147,20 +180,114 @@ function CampaignsPage() {
                   </SelectContent>
                 </Select>
               </div>
-              <Card className="p-3 bg-accent/40 text-sm">
-                <div><strong>{targets.length}</strong> client(s) will receive this email.</div>
+
+              {/* Optional Filters */}
+              <div className="space-y-2">
+                <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Optional Filters</div>
+
+                {/* Country Filter */}
+                <div className={`rounded-lg border p-3 transition-colors ${useCountry ? "bg-primary/5 border-primary/30" : "bg-muted/30"}`}>
+                  <label className="flex items-center gap-2.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={useCountry}
+                      onChange={(e) => { setUseCountry(e.target.checked); if (!e.target.checked) setCountry(""); }}
+                      className="rounded accent-primary w-4 h-4"
+                    />
+                    <Globe className="w-4 h-4 text-primary" />
+                    <span className="text-sm font-medium">Filter by Country</span>
+                  </label>
+                  {useCountry && (
+                    <div className="mt-2.5">
+                      <Select value={country} onValueChange={setCountry}>
+                        <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Choose country" /></SelectTrigger>
+                        <SelectContent>
+                          {countries.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+                </div>
+
+                {/* Date Filter */}
+                <div className={`rounded-lg border p-3 transition-colors ${useDate ? "bg-primary/5 border-primary/30" : "bg-muted/30"}`}>
+                  <label className="flex items-center gap-2.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={useDate}
+                      onChange={(e) => { setUseDate(e.target.checked); if (!e.target.checked) { setDateFrom(""); setDateTo(""); } }}
+                      className="rounded accent-primary w-4 h-4"
+                    />
+                    <Calendar className="w-4 h-4 text-primary" />
+                    <span className="text-sm font-medium">Filter by Date Added</span>
+                  </label>
+                  {useDate && (
+                    <div className="mt-2.5 grid grid-cols-2 gap-2">
+                      <div>
+                        <Label className="text-xs text-muted-foreground">From</Label>
+                        <Input type="date" className="h-8 text-sm" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+                      </div>
+                      <div>
+                        <Label className="text-xs text-muted-foreground">To</Label>
+                        <Input type="date" className="h-8 text-sm" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Repeat Campaign Filter */}
+                <div className={`rounded-lg border p-3 transition-colors ${useRepeat ? "bg-primary/5 border-primary/30" : "bg-muted/30"}`}>
+                  <label className="flex items-center gap-2.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={useRepeat}
+                      onChange={(e) => { setUseRepeat(e.target.checked); if (!e.target.checked) { setRepeatCampaignId(""); setRepeatClientIds(new Set()); } }}
+                      className="rounded accent-primary w-4 h-4"
+                    />
+                    <Repeat2 className="w-4 h-4 text-primary" />
+                    <span className="text-sm font-medium">Repeat from Previous Campaign</span>
+                  </label>
+                  {useRepeat && (
+                    <div className="mt-2.5">
+                      <Select value={repeatCampaignId} onValueChange={setRepeatCampaignId}>
+                        <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Choose previous campaign" /></SelectTrigger>
+                        <SelectContent>
+                          {campaigns.map((c) => (
+                            <SelectItem key={c.id} value={c.id}>
+                              {c.name} ({new Date(c.created_at).toLocaleDateString()})
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-muted-foreground mt-1.5">Only sends to clients from the selected campaign.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Target count */}
+              <Card className={`p-3 text-sm font-medium ${targets.length === 0 ? "bg-destructive/10 text-destructive" : "bg-primary/8 text-primary"}`}>
+                <span className="text-lg font-bold">{targets.length}</span> client(s) will receive this email.
               </Card>
+
+              {/* Progress */}
               {sending && (
                 <div className="space-y-2">
                   <Progress value={(progress.done / Math.max(progress.total, 1)) * 100} />
                   <div className="text-xs text-muted-foreground flex justify-between">
                     <span>{progress.done} / {progress.total}</span>
-                    <span><span className="text-success">{progress.success} sent</span> • <span className="text-destructive">{progress.fail} failed</span></span>
+                    <span>
+                      <span className="text-green-600 font-medium">{progress.success} sent</span>
+                      {" · "}
+                      <span className="text-destructive font-medium">{progress.fail} failed</span>
+                    </span>
                   </div>
                 </div>
               )}
-              <Button type="submit" className="w-full" disabled={sending}>
-                <Send className="w-4 h-4 mr-2" />{sending ? "Sending..." : `Start Campaign (${targets.length})`}
+
+              <Button type="submit" className="w-full" disabled={sending || targets.length === 0}>
+                <Send className="w-4 h-4 mr-2" />
+                {sending ? "Sending…" : `Start Campaign (${targets.length})`}
               </Button>
             </form>
           </DialogContent>
@@ -168,43 +295,57 @@ function CampaignsPage() {
       </div>
 
       {(templates.length === 0 || clients.length === 0) && (
-        <Card className="p-4 bg-warning/10 border-warning/30 text-sm">
-          You need at least one <Link to="/app/templates" className="text-primary underline">template</Link> and one <Link to="/app/clients" className="text-primary underline">client</Link> to start a campaign.
+        <Card className="p-4 bg-amber-50 dark:bg-amber-950/20 border-amber-200 dark:border-amber-800 text-sm text-amber-800 dark:text-amber-300">
+          You need at least one{" "}
+          <Link to="/app/templates" className="underline font-medium">template</Link>{" "}
+          and one{" "}
+          <Link to="/app/clients" className="underline font-medium">client</Link>{" "}
+          to start a campaign.
         </Card>
       )}
 
       <Card className="overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-muted">
+            <thead className="bg-muted/60 border-b">
               <tr className="text-left">
-                <th className="px-4 py-3">Campaign</th>
-                <th className="px-4 py-3">Country</th>
-                <th className="px-4 py-3">Template</th>
-                <th className="px-4 py-3">Recipients</th>
-                <th className="px-4 py-3">Result</th>
-                <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3">Started By</th>
-                <th className="px-4 py-3">Date</th>
+                <th className="px-4 py-3 font-semibold text-xs uppercase tracking-wider text-muted-foreground">Campaign</th>
+                <th className="px-4 py-3 font-semibold text-xs uppercase tracking-wider text-muted-foreground hidden sm:table-cell">Country</th>
+                <th className="px-4 py-3 font-semibold text-xs uppercase tracking-wider text-muted-foreground hidden md:table-cell">Template</th>
+                <th className="px-4 py-3 font-semibold text-xs uppercase tracking-wider text-muted-foreground hidden sm:table-cell">Recipients</th>
+                <th className="px-4 py-3 font-semibold text-xs uppercase tracking-wider text-muted-foreground">Result</th>
+                <th className="px-4 py-3 font-semibold text-xs uppercase tracking-wider text-muted-foreground">Status</th>
+                <th className="px-4 py-3 font-semibold text-xs uppercase tracking-wider text-muted-foreground hidden lg:table-cell">Started By</th>
+                <th className="px-4 py-3 font-semibold text-xs uppercase tracking-wider text-muted-foreground hidden md:table-cell">Date</th>
               </tr>
             </thead>
             <tbody className="divide-y">
               {campaigns.length === 0 ? (
-                <tr><td colSpan={8} className="px-4 py-8 text-center text-muted-foreground">No campaigns yet</td></tr>
+                <tr><td colSpan={8} className="px-4 py-10 text-center text-muted-foreground">No campaigns yet</td></tr>
               ) : campaigns.map((c) => (
-                <tr key={c.id} className="hover:bg-muted/40">
-                  <td className="px-4 py-2"><Link to="/app/campaigns/$id" params={{ id: c.id }} className="text-primary hover:underline font-medium">{c.name}</Link></td>
-                  <td className="px-4 py-2">{c.country}</td>
-                  <td className="px-4 py-2">{c.templates?.name ?? "—"}</td>
-                  <td className="px-4 py-2">{c.total_recipients}</td>
-                  <td className="px-4 py-2 text-xs">
-                    <span className="inline-flex items-center gap-1 text-success"><CheckCircle2 className="w-3 h-3" />{c.success_count}</span>
-                    {" / "}
-                    <span className="inline-flex items-center gap-1 text-destructive"><XCircle className="w-3 h-3" />{c.fail_count}</span>
+                <tr key={c.id} className="hover:bg-muted/30 transition-colors">
+                  <td className="px-4 py-2.5">
+                    <Link to="/app/campaigns/$id" params={{ id: c.id }} className="text-primary hover:underline font-medium">{c.name}</Link>
                   </td>
-                  <td className="px-4 py-2"><StatusBadge status={c.status} /></td>
-                  <td className="px-4 py-2">{c.started_by}</td>
-                  <td className="px-4 py-2 text-muted-foreground">{new Date(c.created_at).toLocaleString()}</td>
+                  <td className="px-4 py-2.5 hidden sm:table-cell">
+                    {c.country ? (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-primary/8 text-primary font-medium">{c.country}</span>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">All</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-2.5 hidden md:table-cell text-muted-foreground">{c.templates?.name ?? "—"}</td>
+                  <td className="px-4 py-2.5 hidden sm:table-cell font-medium">{c.total_recipients}</td>
+                  <td className="px-4 py-2.5">
+                    <div className="flex items-center gap-1.5 text-xs">
+                      <span className="inline-flex items-center gap-0.5 text-green-600 font-semibold"><CheckCircle2 className="w-3 h-3" />{c.success_count}</span>
+                      <span className="text-muted-foreground">/</span>
+                      <span className="inline-flex items-center gap-0.5 text-destructive font-semibold"><XCircle className="w-3 h-3" />{c.fail_count}</span>
+                    </div>
+                  </td>
+                  <td className="px-4 py-2.5"><StatusBadge status={c.status} /></td>
+                  <td className="px-4 py-2.5 hidden lg:table-cell text-muted-foreground text-xs">{c.started_by}</td>
+                  <td className="px-4 py-2.5 hidden md:table-cell text-muted-foreground text-xs">{new Date(c.created_at).toLocaleString()}</td>
                 </tr>
               ))}
             </tbody>
@@ -216,11 +357,15 @@ function CampaignsPage() {
 }
 
 function StatusBadge({ status }: { status: string }) {
-  const colors: Record<string, string> = {
-    completed: "bg-success/10 text-success",
-    running: "bg-warning/20 text-warning-foreground",
-    failed: "bg-destructive/10 text-destructive",
+  const map: Record<string, string> = {
+    completed: "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-400",
+    running: "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-400",
+    failed: "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-400",
     pending: "bg-muted text-muted-foreground",
   };
-  return <span className={`text-xs px-2 py-0.5 rounded-full ${colors[status] ?? colors.pending}`}>{status}</span>;
+  return (
+    <span className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${map[status] ?? map.pending}`}>
+      {status}
+    </span>
+  );
 }

@@ -1,4 +1,3 @@
-// Simple localStorage-based session (admin/123 + employees)
 export interface Session {
   id: string;
   username: string;
@@ -10,7 +9,7 @@ const KEY = "sj_session";
 
 export function getSession(): Session | null {
   if (typeof window === "undefined") return null;
-  const raw = localStorage.getItem(KEY);
+  const raw = sessionStorage.getItem(KEY);
   if (!raw) return null;
   try {
     return JSON.parse(raw) as Session;
@@ -20,9 +19,9 @@ export function getSession(): Session | null {
 }
 
 export function setSession(s: Session) {
-  localStorage.setItem(KEY, JSON.stringify(s));
+  sessionStorage.setItem(KEY, JSON.stringify(s));
 }
 
 export function clearSession() {
-  localStorage.removeItem(KEY);
+  sessionStorage.removeItem(KEY);
 }

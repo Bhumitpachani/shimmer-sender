@@ -1,0 +1,5 @@
+ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS website TEXT;
+ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS state TEXT;
+
+ALTER TABLE public.campaigns ALTER COLUMN country DROP NOT NULL;
+ALTER TABLE public.campaigns ALTER COLUMN country SET DEFAULT NULL;
