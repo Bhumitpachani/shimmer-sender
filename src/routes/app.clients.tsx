@@ -79,7 +79,9 @@ function ClientsPage() {
         state: form.state.trim() || null, website: form.website.trim() || null,
         company: form.company.trim() || null, added_by: session?.username ?? "admin",
       });
-      if (error) { toast.error(error.startsWith("23505") ? "Email or mobile already exists" : error); return; }
+      if (error === "23505_email") { toast.error("This email address already exists"); return; }
+      if (error === "23505_mobile") { toast.error("This mobile number already exists"); return; }
+      if (error) { toast.error(error); return; }
       toast.success("Client added successfully");
       setForm({ name: "", email: "", mobile: "", country: "", state: "", website: "", company: "" });
       setAddOpen(false);
@@ -105,6 +107,7 @@ function ClientsPage() {
       const wb = XLSX.read(buf);
       const rows = XLSX.utils.sheet_to_json<any>(wb.Sheets[wb.SheetNames[0]]);
       let added = 0, updated = 0, invalid = 0;
+      let conflicts = 0;
       for (const row of rows) {
         const name = String(row.name ?? row.Name ?? "").trim();
         const email = String(row.email ?? row.Email ?? "").trim().toLowerCase();
@@ -112,18 +115,22 @@ function ClientsPage() {
         const ctry = String(row.country ?? row.Country ?? "").trim();
         if (!name || !email || !mobile || !ctry) { invalid++; continue; }
         try {
-          const { action } = await db.clients.upsertByEmail({
+          const { action, error } = await db.clients.upsertByEmailOrMobile({
             name, email, mobile, country: ctry,
             state: String(row.state ?? row.State ?? row.city ?? "").trim() || null,
             website: String(row.website ?? "").trim() || null,
             company: String(row.company ?? row.Company ?? "").trim() || null,
             added_by: session?.username ?? "admin",
           });
-          if (action === "inserted") added++;
+          if (error === "mobile_conflict") conflicts++;
+          else if (action === "inserted") added++;
           else updated++;
         } catch { invalid++; }
       }
-      toast.success(`Import done: ${added} added · ${updated} updated · ${invalid} invalid`);
+      const parts = [`${added} added`, `${updated} updated`];
+      if (conflicts > 0) parts.push(`${conflicts} mobile conflicts`);
+      if (invalid > 0) parts.push(`${invalid} invalid`);
+      toast.success(`Import done: ${parts.join(" · ")}`);
       await load();
     } catch {
       toast.error("Failed to read file");

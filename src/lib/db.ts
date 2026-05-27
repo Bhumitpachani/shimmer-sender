@@ -166,15 +166,20 @@ export const db = {
       await setDoc(doc(firestoreDb, "clients", id), { ...data, id, created_at: now() });
       return { error: null };
     },
-    async upsertByEmail(
+    async upsertByEmailOrMobile(
       data: Omit<Client, "id" | "created_at">
     ): Promise<{ action: "inserted" | "updated"; error: string | null }> {
-      const snap = await getDocs(
-        query(collection(firestoreDb, "clients"), where("email", "==", data.email))
-      );
-      if (!snap.empty) {
-        const existing = snap.docs[0];
-        await updateDoc(doc(firestoreDb, "clients", existing.id), {
+      const [emailSnap, mobileSnap] = await Promise.all([
+        getDocs(query(collection(firestoreDb, "clients"), where("email", "==", data.email))),
+        getDocs(query(collection(firestoreDb, "clients"), where("mobile", "==", data.mobile))),
+      ]);
+
+      if (!emailSnap.empty) {
+        const existingId = emailSnap.docs[0].id;
+        if (!mobileSnap.empty && mobileSnap.docs[0].id !== existingId) {
+          return { action: "updated", error: "mobile_conflict" };
+        }
+        await updateDoc(doc(firestoreDb, "clients", existingId), {
           name: data.name,
           mobile: data.mobile,
           country: data.country,
@@ -185,6 +190,21 @@ export const db = {
         });
         return { action: "updated", error: null };
       }
+
+      if (!mobileSnap.empty) {
+        const existingId = mobileSnap.docs[0].id;
+        await updateDoc(doc(firestoreDb, "clients", existingId), {
+          name: data.name,
+          email: data.email,
+          country: data.country,
+          state: data.state ?? null,
+          website: data.website ?? null,
+          company: data.company ?? null,
+          added_by: data.added_by,
+        });
+        return { action: "updated", error: null };
+      }
+
       const id = uid();
       await setDoc(doc(firestoreDb, "clients", id), { ...data, id, created_at: now() });
       return { action: "inserted", error: null };
