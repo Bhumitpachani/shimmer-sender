@@ -209,6 +209,33 @@ export const db = {
       await setDoc(doc(firestoreDb, "clients", id), { ...data, id, created_at: now() });
       return { action: "inserted", error: null };
     },
+    async update(
+      id: string,
+      data: Partial<Omit<Client, "id" | "created_at">>
+    ): Promise<{ error: string | null }> {
+      const checks: Promise<void>[] = [];
+      if (data.email) {
+        checks.push(
+          getDocs(query(collection(firestoreDb, "clients"), where("email", "==", data.email))).then((snap) => {
+            if (!snap.empty && snap.docs[0].id !== id) throw new Error("23505_email");
+          })
+        );
+      }
+      if (data.mobile) {
+        checks.push(
+          getDocs(query(collection(firestoreDb, "clients"), where("mobile", "==", data.mobile))).then((snap) => {
+            if (!snap.empty && snap.docs[0].id !== id) throw new Error("23505_mobile");
+          })
+        );
+      }
+      try {
+        await Promise.all(checks);
+      } catch (e: any) {
+        return { error: e.message };
+      }
+      await updateDoc(doc(firestoreDb, "clients", id), data as any);
+      return { error: null };
+    },
     async delete(id: string): Promise<{ error: string | null }> {
       await deleteDoc(doc(firestoreDb, "clients", id));
       return { error: null };
