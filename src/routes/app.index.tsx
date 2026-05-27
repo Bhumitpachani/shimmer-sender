@@ -1,8 +1,8 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { db } from "@/lib/db";
+import { db, type Campaign, type Client, type Template } from "@/lib/db";
 import { getSession } from "@/lib/session";
-import { Users, Mail, Send, CheckCircle2, XCircle, ArrowRight, Plus, FileSpreadsheet, TrendingUp, Activity } from "lucide-react";
+import { Users, Mail, Send, CheckCircle2, XCircle, ArrowRight, Plus, TrendingUp, Activity } from "lucide-react";
 
 export const Route = createFileRoute("/app/")({
   component: Dashboard,
@@ -17,26 +17,31 @@ function Dashboard() {
   }, [session, navigate]);
 
   const [stats, setStats] = useState({ clients: 0, templates: 0, campaigns: 0, success: 0, fail: 0 });
-  const [recentCampaigns, setRecentCampaigns] = useState<any[]>([]);
-  const [recentClients, setRecentClients] = useState<any[]>([]);
-  const [templates, setTemplates] = useState<any[]>([]);
+  const [recentCampaigns, setRecentCampaigns] = useState<Campaign[]>([]);
+  const [recentClients, setRecentClients] = useState<Client[]>([]);
+  const [templates, setTemplates] = useState<Template[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const all = {
-      clients: db.clients.getAll(),
-      templates: db.templates.getAll(),
-      campaigns: db.campaigns.getAll(),
-    };
-    setStats({
-      clients: all.clients.length,
-      templates: all.templates.length,
-      campaigns: all.campaigns.length,
-      success: db.sendHistory.countByStatus("success"),
-      fail: db.sendHistory.countByStatus("fail"),
-    });
-    setRecentCampaigns(all.campaigns.slice(0, 6));
-    setRecentClients(all.clients.slice(0, 5));
-    setTemplates(all.templates);
+    if (session?.role === "employee") return;
+    Promise.all([
+      db.clients.getAll(),
+      db.templates.getAll(),
+      db.campaigns.getAll(),
+      db.sendHistory.countByStatus("success"),
+      db.sendHistory.countByStatus("fail"),
+    ]).then(([allClients, allTemplates, allCampaigns, success, fail]) => {
+      setStats({
+        clients: allClients.length,
+        templates: allTemplates.length,
+        campaigns: allCampaigns.length,
+        success,
+        fail,
+      });
+      setRecentCampaigns(allCampaigns.slice(0, 6));
+      setRecentClients(allClients.slice(0, 5));
+      setTemplates(allTemplates);
+    }).finally(() => setLoading(false));
   }, []);
 
   if (session?.role === "employee") return null;
@@ -68,11 +73,11 @@ function Dashboard() {
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
-        <StatCard icon={Users} label="Total Clients" value={stats.clients} color="blue" sub="All contacts" />
-        <StatCard icon={Mail} label="Templates" value={stats.templates} color="violet" sub="Email designs" />
-        <StatCard icon={Send} label="Campaigns" value={stats.campaigns} color="amber" sub="All time" />
-        <StatCard icon={CheckCircle2} label="Emails Sent" value={stats.success} color="emerald" sub={`${successRate}% success rate`} />
-        <StatCard icon={XCircle} label="Failed" value={stats.fail} color="red" sub="Delivery issues" />
+        <StatCard icon={Users} label="Total Clients" value={stats.clients} color="blue" sub="All contacts" loading={loading} />
+        <StatCard icon={Mail} label="Templates" value={stats.templates} color="violet" sub="Email designs" loading={loading} />
+        <StatCard icon={Send} label="Campaigns" value={stats.campaigns} color="amber" sub="All time" loading={loading} />
+        <StatCard icon={CheckCircle2} label="Emails Sent" value={stats.success} color="emerald" sub={`${successRate}% success rate`} loading={loading} />
+        <StatCard icon={XCircle} label="Failed" value={stats.fail} color="red" sub="Delivery issues" loading={loading} />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -87,7 +92,11 @@ function Dashboard() {
                 View all <ArrowRight className="w-3 h-3" />
               </Link>
             </div>
-            {recentCampaigns.length === 0 ? (
+            {loading ? (
+              <div className="flex justify-center py-14">
+                <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+              </div>
+            ) : recentCampaigns.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-14 text-center px-6">
                 <div className="w-12 h-12 rounded-2xl bg-slate-100 flex items-center justify-center mb-3">
                   <Send className="w-5 h-5 text-slate-400" />
@@ -168,7 +177,11 @@ function Dashboard() {
               <span className="font-semibold text-slate-800 dark:text-white text-sm">Recent Clients</span>
               <Link to="/app/clients" className="text-xs text-primary hover:underline">View all</Link>
             </div>
-            {recentClients.length === 0 ? (
+            {loading ? (
+              <div className="flex justify-center py-8">
+                <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+              </div>
+            ) : recentClients.length === 0 ? (
               <div className="px-5 py-6 text-center text-xs text-slate-400">No clients yet</div>
             ) : (
               <div className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -214,7 +227,7 @@ function getAvatarColor(name: string) {
   return AVATAR_COLORS[name.charCodeAt(0) % AVATAR_COLORS.length];
 }
 
-function StatCard({ icon: Icon, label, value, color, sub }: { icon: any; label: string; value: number; color: string; sub: string }) {
+function StatCard({ icon: Icon, label, value, color, sub, loading }: { icon: any; label: string; value: number; color: string; sub: string; loading?: boolean }) {
   const colors: Record<string, string> = {
     blue: "bg-blue-50 text-blue-600",
     violet: "bg-violet-50 text-violet-600",
@@ -230,7 +243,11 @@ function StatCard({ icon: Icon, label, value, color, sub }: { icon: any; label: 
         </div>
       </div>
       <div className="mt-3">
-        <div className="text-2xl font-bold text-slate-900 dark:text-white">{value.toLocaleString()}</div>
+        {loading ? (
+          <div className="h-8 w-16 bg-slate-100 rounded animate-pulse" />
+        ) : (
+          <div className="text-2xl font-bold text-slate-900 dark:text-white">{value.toLocaleString()}</div>
+        )}
         <div className="text-sm font-medium text-slate-600 dark:text-slate-300 mt-0.5">{label}</div>
         <div className="text-xs text-slate-400 mt-0.5">{sub}</div>
       </div>

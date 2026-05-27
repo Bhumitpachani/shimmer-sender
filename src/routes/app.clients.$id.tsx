@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useState } from "react";
-import { db } from "@/lib/db";
+import { useEffect, useState } from "react";
+import { db, type Client, type SendHistory } from "@/lib/db";
 import { ArrowLeft, CheckCircle2, XCircle, User, Mail, Phone, Globe, Building2, MapPin, Calendar, AlertCircle } from "lucide-react";
 
 export const Route = createFileRoute("/app/clients/$id")({
@@ -16,16 +16,32 @@ function getAvatarColor(name: string) { return AVATAR_COLORS[name.charCodeAt(0) 
 
 function ClientDetail() {
   const { id } = Route.useParams();
-  const [client] = useState(() => db.clients.getById(id));
-  const [history] = useState(() => db.sendHistory.getByClientId(id));
+  const [client, setClient] = useState<Client | null>(null);
+  const [history, setHistory] = useState<SendHistory[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    Promise.all([
+      db.clients.getById(id),
+      db.sendHistory.getByClientId(id),
+    ]).then(([c, h]) => {
+      setClient(c);
+      setHistory(h);
+    }).finally(() => setLoading(false));
+  }, [id]);
+
+  if (loading) {
+    return (
+      <div className="flex justify-center py-20">
+        <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
 
   if (!client) {
     return (
       <div className="space-y-4">
-        <Link
-          to="/app/clients"
-          className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800 transition-colors"
-        >
+        <Link to="/app/clients" className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800 transition-colors">
           <ArrowLeft className="w-4 h-4" /> Back to Clients
         </Link>
         <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-14 text-center">
@@ -44,10 +60,7 @@ function ClientDetail() {
 
   return (
     <div className="space-y-5">
-      <Link
-        to="/app/clients"
-        className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800 transition-colors"
-      >
+      <Link to="/app/clients" className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800 transition-colors">
         <ArrowLeft className="w-4 h-4" /> Back to Clients
       </Link>
 

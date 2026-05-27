@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useState, useMemo } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { db, type Client } from "@/lib/db";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Plus, Search, FileSpreadsheet, Filter, MoreHorizontal, Trash2, Eye, X, ChevronDown, Download } from "lucide-react";
+import { Plus, Search, FileSpreadsheet, Filter, MoreHorizontal, Trash2, Eye, X, ChevronDown, Download, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { getSession } from "@/lib/session";
 import * as XLSX from "xlsx";
@@ -25,12 +25,8 @@ function ClientsPage() {
   const navigate = useNavigate();
   const isEmployee = session?.role === "employee";
 
-  const allClients = useMemo(() => {
-    const all = db.clients.getAll();
-    return isEmployee ? all.filter((c) => c.added_by === session?.username) : all;
-  }, [isEmployee, session?.username]);
-
-  const [clients, setClients] = useState<Client[]>(() => allClients);
+  const [clients, setClients] = useState<Client[]>([]);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [country, setCountry] = useState("all");
   const [addedBy, setAddedBy] = useState("all");
@@ -38,13 +34,21 @@ function ClientsPage() {
   const [dateTo, setDateTo] = useState("");
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [form, setForm] = useState({ name: "", email: "", mobile: "", country: "", state: "", website: "", company: "" });
 
-  const load = () => {
-    const all = db.clients.getAll();
-    setClients(isEmployee ? all.filter((c) => c.added_by === session?.username) : all);
+  const load = async () => {
+    setLoading(true);
+    try {
+      const all = await db.clients.getAll();
+      setClients(isEmployee ? all.filter((c) => c.added_by === session?.username) : all);
+    } finally {
+      setLoading(false);
+    }
   };
+
+  useEffect(() => { load(); }, []);
 
   const countries = useMemo(() => Array.from(new Set(clients.map((c) => c.country))).filter(Boolean).sort(), [clients]);
   const addedBys = useMemo(() => Array.from(new Set(clients.map((c) => c.added_by))).filter(Boolean).sort(), [clients]);
@@ -63,29 +67,33 @@ function ClientsPage() {
 
   const hasFilters = country !== "all" || (!isEmployee && addedBy !== "all") || !!dateFrom || !!dateTo;
   const filterCount = [country !== "all", !isEmployee && addedBy !== "all", !!dateFrom, !!dateTo].filter(Boolean).length;
-
   const clearFilters = () => { setCountry("all"); setAddedBy("all"); setDateFrom(""); setDateTo(""); };
 
-  const handleAdd = (e: React.FormEvent) => {
+  const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
-    const { error } = db.clients.insert({
-      name: form.name.trim(), email: form.email.trim().toLowerCase(),
-      mobile: form.mobile.trim(), country: form.country.trim(),
-      state: form.state.trim() || null, website: form.website.trim() || null,
-      company: form.company.trim() || null, added_by: session?.username ?? "admin",
-    });
-    if (error) { toast.error(error.startsWith("23505") ? "Email or mobile already exists" : error); return; }
-    toast.success("Client added successfully");
-    setForm({ name: "", email: "", mobile: "", country: "", state: "", website: "", company: "" });
-    setAddOpen(false);
-    load();
+    setSaving(true);
+    try {
+      const { error } = await db.clients.insert({
+        name: form.name.trim(), email: form.email.trim().toLowerCase(),
+        mobile: form.mobile.trim(), country: form.country.trim(),
+        state: form.state.trim() || null, website: form.website.trim() || null,
+        company: form.company.trim() || null, added_by: session?.username ?? "admin",
+      });
+      if (error) { toast.error(error.startsWith("23505") ? "Email or mobile already exists" : error); return; }
+      toast.success("Client added successfully");
+      setForm({ name: "", email: "", mobile: "", country: "", state: "", website: "", company: "" });
+      setAddOpen(false);
+      await load();
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const handleDelete = (id: string, name: string) => {
+  const handleDelete = async (id: string, name: string) => {
     if (!confirm(`Delete "${name}"? This cannot be undone.`)) return;
-    db.clients.delete(id);
+    await db.clients.delete(id);
     toast.success("Client deleted");
-    load();
+    await load();
   };
 
   const handleExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -96,18 +104,27 @@ function ClientsPage() {
       const buf = await file.arrayBuffer();
       const wb = XLSX.read(buf);
       const rows = XLSX.utils.sheet_to_json<any>(wb.Sheets[wb.SheetNames[0]]);
-      let ok = 0, dup = 0, bad = 0;
+      let added = 0, updated = 0, invalid = 0;
       for (const row of rows) {
         const name = String(row.name ?? row.Name ?? "").trim();
         const email = String(row.email ?? row.Email ?? "").trim().toLowerCase();
         const mobile = String(row.mobile ?? row.Mobile ?? row.number ?? row.Number ?? "").trim();
         const ctry = String(row.country ?? row.Country ?? "").trim();
-        if (!name || !email || !mobile || !ctry) { bad++; continue; }
-        const { error } = db.clients.insert({ name, email, mobile, country: ctry, state: String(row.state ?? row.State ?? row.city ?? "").trim() || null, website: String(row.website ?? "").trim() || null, company: String(row.company ?? "").trim() || null, added_by: session?.username ?? "admin" });
-        if (error) { error.startsWith("23505") ? dup++ : bad++; } else ok++;
+        if (!name || !email || !mobile || !ctry) { invalid++; continue; }
+        try {
+          const { action } = await db.clients.upsertByEmail({
+            name, email, mobile, country: ctry,
+            state: String(row.state ?? row.State ?? row.city ?? "").trim() || null,
+            website: String(row.website ?? "").trim() || null,
+            company: String(row.company ?? row.Company ?? "").trim() || null,
+            added_by: session?.username ?? "admin",
+          });
+          if (action === "inserted") added++;
+          else updated++;
+        } catch { invalid++; }
       }
-      toast.success(`Imported ${ok} · ${dup} duplicates · ${bad} invalid`);
-      load();
+      toast.success(`Import done: ${added} added · ${updated} updated · ${invalid} invalid`);
+      await load();
     } catch {
       toast.error("Failed to read file");
     } finally {
@@ -130,15 +147,15 @@ function ClientsPage() {
       "Date Added": new Date(c.created_at).toLocaleDateString(),
     }));
     const ws = XLSX.utils.json_to_sheet(rows);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Clients");
+    const wbOut = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wbOut, ws, "Clients");
     const label = [
       country !== "all" ? country : "",
       !isEmployee && addedBy !== "all" ? addedBy : "",
       dateFrom ? `from-${dateFrom}` : "",
       dateTo ? `to-${dateTo}` : "",
     ].filter(Boolean).join("_") || "all";
-    XLSX.writeFile(wb, `clients_${label}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    XLSX.writeFile(wbOut, `clients_${label}_${new Date().toISOString().slice(0, 10)}.xlsx`);
     toast.success(`Exported ${filtered.length} clients`);
   };
 
@@ -155,6 +172,9 @@ function ClientsPage() {
           </p>
         </div>
         <div className="flex gap-2 flex-wrap">
+          <Button variant="outline" size="sm" className="gap-1.5 shadow-sm" onClick={() => load()} disabled={loading}>
+            <RefreshCw className={cn("w-4 h-4", loading && "animate-spin")} />Refresh
+          </Button>
           <Button variant="outline" size="sm" className="gap-1.5 shadow-sm" onClick={handleExport}>
             <Download className="w-4 h-4" />Export
           </Button>
@@ -180,7 +200,9 @@ function ClientsPage() {
                 </div>
                 <div><Label>Website</Label><Input value={form.website} onChange={(e) => setForm({ ...form, website: e.target.value })} placeholder="https://… (optional)" className="mt-1" /></div>
                 <div><Label>Company</Label><Input value={form.company} onChange={(e) => setForm({ ...form, company: e.target.value })} placeholder="optional" className="mt-1" /></div>
-                <Button type="submit" className="w-full mt-1">Add Client</Button>
+                <Button type="submit" className="w-full mt-1" disabled={saving}>
+                  {saving ? <span className="flex items-center gap-2"><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />Saving…</span> : "Add Client"}
+                </Button>
               </form>
             </DialogContent>
           </Dialog>
@@ -241,7 +263,7 @@ function ClientsPage() {
             )}
           </div>
         )}
-        {(search || hasFilters) && (
+        {(search || hasFilters) && !loading && (
           <div className="text-xs text-slate-500 pt-1 border-t border-slate-100">
             Showing <span className="font-semibold text-slate-700">{filtered.length}</span> of {clients.length} clients
           </div>
@@ -265,7 +287,13 @@ function ClientsPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-              {filtered.length === 0 ? (
+              {loading ? (
+                <tr>
+                  <td colSpan={9} className="px-4 py-14 text-center">
+                    <div className="flex justify-center"><div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" /></div>
+                  </td>
+                </tr>
+              ) : filtered.length === 0 ? (
                 <tr>
                   <td colSpan={9} className="px-4 py-14 text-center">
                     <div className="flex flex-col items-center gap-2">
@@ -343,7 +371,8 @@ function ClientsPage() {
       <div className="bg-amber-50 border border-amber-200 rounded-xl p-3.5 text-xs text-amber-800">
         <span className="font-semibold">Excel import columns:</span>{" "}
         <span className="font-mono">name, email, mobile, country</span> (required) ·{" "}
-        <span className="font-mono">state, website, company</span> (optional) · Duplicates are skipped automatically.
+        <span className="font-mono">state, website, company</span> (optional) ·{" "}
+        <span className="font-semibold">Existing emails are updated automatically — no duplicates ever.</span>
       </div>
     </div>
   );

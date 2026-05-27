@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useState } from "react";
-import { db } from "@/lib/db";
+import { useEffect, useState } from "react";
+import { db, type Campaign, type SendHistory, type Template, type Client } from "@/lib/db";
 import { getSession } from "@/lib/session";
 import { ArrowLeft, CheckCircle2, XCircle, Send, Users, TrendingUp, AlertCircle, User } from "lucide-react";
 
@@ -17,18 +17,38 @@ function CampaignDetail() {
   const session = getSession();
   const isAdmin = session?.role === "admin";
 
-  const [campaign] = useState(() => db.campaigns.getById(id));
-  const [allHistory] = useState(() => db.sendHistory.getByCampaignId(id));
-  const [templates] = useState(() => db.templates.getAll());
-  const [clients] = useState(() => db.clients.getAll());
+  const [campaign, setCampaign] = useState<Campaign | null>(null);
+  const [allHistory, setAllHistory] = useState<SendHistory[]>([]);
+  const [templates, setTemplates] = useState<Template[]>([]);
+  const [clients, setClients] = useState<Client[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    Promise.all([
+      db.campaigns.getById(id),
+      db.sendHistory.getByCampaignId(id),
+      db.templates.getAll(),
+      db.clients.getAll(),
+    ]).then(([camp, hist, tmpls, clnts]) => {
+      setCampaign(camp);
+      setAllHistory(hist);
+      setTemplates(tmpls);
+      setClients(clnts);
+    }).finally(() => setLoading(false));
+  }, [id]);
+
+  if (loading) {
+    return (
+      <div className="flex justify-center py-20">
+        <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
 
   if (!campaign) {
     return (
       <div className="space-y-4">
-        <Link
-          to="/app/campaigns"
-          className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800 transition-colors"
-        >
+        <Link to="/app/campaigns" className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800 transition-colors">
           <ArrowLeft className="w-4 h-4" /> Back to Campaigns
         </Link>
         <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-14 text-center">
@@ -65,10 +85,7 @@ function CampaignDetail() {
   return (
     <div className="space-y-5">
       <div className="flex items-center gap-3">
-        <Link
-          to="/app/campaigns"
-          className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800 transition-colors"
-        >
+        <Link to="/app/campaigns" className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800 transition-colors">
           <ArrowLeft className="w-4 h-4" /> Back to Campaigns
         </Link>
       </div>

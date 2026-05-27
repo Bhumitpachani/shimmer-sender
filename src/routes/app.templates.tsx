@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { db } from "@/lib/db";
+import { db, type Template } from "@/lib/db";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -42,38 +42,54 @@ const SAMPLE = `<div style="font-family: -apple-system, Arial, sans-serif; max-w
 function TemplatesPage() {
   const session = getSession();
   const navigate = useNavigate();
-  const [templates, setTemplates] = useState(() => db.templates.getAll());
+  const [templates, setTemplates] = useState<Template[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [open, setOpen] = useState(false);
-  const [editing, setEditing] = useState<any>(null);
+  const [editing, setEditing] = useState<Template | null>(null);
   const [form, setForm] = useState({ name: "", subject: "", html: SAMPLE });
 
   useEffect(() => {
     if (session && session.role !== "admin") navigate({ to: "/app/clients" });
   }, [session, navigate]);
 
-  const load = () => setTemplates(db.templates.getAll());
-
-  const openNew = () => { setEditing(null); setForm({ name: "", subject: "", html: SAMPLE }); setOpen(true); };
-  const openEdit = (t: any) => { setEditing(t); setForm({ name: t.name, subject: t.subject, html: t.html }); setOpen(true); };
-
-  const handleSave = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (editing) {
-      db.templates.update(editing.id, { name: form.name, subject: form.subject, html: form.html });
-      toast.success("Template updated");
-    } else {
-      db.templates.insert({ name: form.name, subject: form.subject, html: form.html, created_by: session?.username ?? "admin" });
-      toast.success("Template created");
+  const load = async () => {
+    setLoading(true);
+    try {
+      setTemplates(await db.templates.getAll());
+    } finally {
+      setLoading(false);
     }
-    setOpen(false);
-    load();
   };
 
-  const handleDelete = (id: string, name: string) => {
+  useEffect(() => { load(); }, []);
+
+  const openNew = () => { setEditing(null); setForm({ name: "", subject: "", html: SAMPLE }); setOpen(true); };
+  const openEdit = (t: Template) => { setEditing(t); setForm({ name: t.name, subject: t.subject, html: t.html }); setOpen(true); };
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      if (editing) {
+        await db.templates.update(editing.id, { name: form.name, subject: form.subject, html: form.html });
+        toast.success("Template updated");
+      } else {
+        await db.templates.insert({ name: form.name, subject: form.subject, html: form.html, created_by: session?.username ?? "admin" });
+        toast.success("Template created");
+      }
+      setOpen(false);
+      await load();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async (id: string, name: string) => {
     if (!confirm(`Delete template "${name}"?`)) return;
-    db.templates.delete(id);
+    await db.templates.delete(id);
     toast.success("Deleted");
-    load();
+    await load();
   };
 
   if (!session || session.role !== "admin") return null;
@@ -93,7 +109,11 @@ function TemplatesPage() {
         </Button>
       </div>
 
-      {templates.length === 0 ? (
+      {loading ? (
+        <div className="flex justify-center py-20">
+          <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+        </div>
+      ) : templates.length === 0 ? (
         <div className="bg-white dark:bg-slate-900 rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 p-14 text-center">
           <div className="w-14 h-14 rounded-2xl bg-slate-100 flex items-center justify-center mx-auto mb-4">
             <Mail className="w-6 h-6 text-slate-400" />
@@ -177,7 +197,9 @@ function TemplatesPage() {
             </Tabs>
             <div className="flex justify-end gap-3 shrink-0">
               <Button type="button" variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-              <Button type="submit">{editing ? "Save Changes" : "Create Template"}</Button>
+              <Button type="submit" disabled={saving}>
+                {saving ? <span className="flex items-center gap-2"><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />Saving…</span> : (editing ? "Save Changes" : "Create Template")}
+              </Button>
             </div>
           </form>
         </DialogContent>

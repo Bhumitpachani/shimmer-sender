@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { db, ALL_PERMISSIONS, type Permission } from "@/lib/db";
+import { db, ALL_PERMISSIONS, type Permission, type Employee } from "@/lib/db";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -28,8 +28,10 @@ function cn(...cls: (string | boolean | undefined | null)[]) { return cls.filter
 function EmployeesPage() {
   const session = getSession();
   const navigate = useNavigate();
-  const [employees, setEmployees] = useState(() => db.employees.getAll());
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ name: "", username: "", password: "" });
   const [permissions, setPermissions] = useState<Permission[]>(["clients", "campaigns"]);
 
@@ -37,37 +39,51 @@ function EmployeesPage() {
     if (session && session.role !== "admin") navigate({ to: "/app/clients" });
   }, [session, navigate]);
 
-  const load = () => setEmployees(db.employees.getAll());
+  const load = async () => {
+    setLoading(true);
+    try {
+      setEmployees(await db.employees.getAll());
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { load(); }, []);
 
   const togglePerm = (p: Permission) => {
     setPermissions((prev) => prev.includes(p) ? prev.filter((x) => x !== p) : [...prev, p]);
   };
 
-  const handleAdd = (e: React.FormEvent) => {
+  const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
     if (permissions.length === 0) { toast.error("Grant at least one permission"); return; }
-    const { error } = db.employees.insert({
-      name: form.name.trim(),
-      username: form.username.trim(),
-      password: form.password,
-      role: "employee",
-      permissions,
-    });
-    if (error === "23505") { toast.error("Username already taken"); return; }
-    if (error) { toast.error(error); return; }
-    toast.success("Employee added");
-    setForm({ name: "", username: "", password: "" });
-    setPermissions(["clients", "campaigns"]);
-    setOpen(false);
-    load();
+    setSaving(true);
+    try {
+      const { error } = await db.employees.insert({
+        name: form.name.trim(),
+        username: form.username.trim(),
+        password: form.password,
+        role: "employee",
+        permissions,
+      });
+      if (error === "23505") { toast.error("Username already taken"); return; }
+      if (error) { toast.error(error); return; }
+      toast.success("Employee added");
+      setForm({ name: "", username: "", password: "" });
+      setPermissions(["clients", "campaigns"]);
+      setOpen(false);
+      await load();
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const handleDelete = (id: string, name: string, role: string) => {
+  const handleDelete = async (id: string, name: string, role: string) => {
     if (role === "admin") { toast.error("Cannot delete the admin account"); return; }
     if (!confirm(`Remove "${name}" from the team?`)) return;
-    db.employees.delete(id);
+    await db.employees.delete(id);
     toast.success("Employee removed");
-    load();
+    await load();
   };
 
   if (!session || session.role !== "admin") return null;
@@ -125,7 +141,9 @@ function EmployeesPage() {
                 {permissions.length === 0 && <p className="text-xs text-red-500 mt-1.5">Select at least one section.</p>}
               </div>
 
-              <Button type="submit" className="w-full">Create Employee</Button>
+              <Button type="submit" className="w-full" disabled={saving}>
+                {saving ? <span className="flex items-center gap-2"><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />Creating…</span> : "Create Employee"}
+              </Button>
             </form>
           </DialogContent>
         </Dialog>
@@ -160,7 +178,11 @@ function EmployeesPage() {
           <h2 className="text-sm font-semibold text-slate-700 dark:text-white">Team Members</h2>
         </div>
         <div className="divide-y divide-slate-100 dark:divide-slate-800">
-          {employees.map((e) => (
+          {loading ? (
+            <div className="flex justify-center py-14">
+              <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+            </div>
+          ) : employees.map((e) => (
             <div key={e.id} className="flex items-center gap-4 px-5 py-3.5 hover:bg-slate-50/70 dark:hover:bg-slate-800/30 transition-colors">
               <div className={cn("w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold text-white shrink-0", getAvatarColor(e.name))}>
                 {e.name.charAt(0).toUpperCase()}

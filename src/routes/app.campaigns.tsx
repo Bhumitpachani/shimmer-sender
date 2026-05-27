@@ -1,13 +1,13 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
-import { db } from "@/lib/db";
+import { useEffect, useMemo, useState } from "react";
+import { db, type Campaign, type Client, type Template } from "@/lib/db";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Progress } from "@/components/ui/progress";
-import { Send, Plus, Globe, Calendar, Repeat2, Eye } from "lucide-react";
+import { Send, Plus, Globe, Calendar, Repeat2, Eye, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { getSession } from "@/lib/session";
 import { sendMail } from "@/lib/mailApi";
@@ -23,14 +23,10 @@ function CampaignsPage() {
   const navigate = useNavigate();
   const isEmployee = session?.role === "employee";
 
-  const allCampaigns = useMemo(() => {
-    const all = db.campaigns.getAll();
-    return isEmployee ? all.filter((c) => c.started_by === session?.username) : all;
-  }, [isEmployee, session?.username]);
-
-  const [campaigns, setCampaigns] = useState(() => allCampaigns);
-  const [clients] = useState(() => db.clients.getAll());
-  const [templates] = useState(() => db.templates.getAll());
+  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [clients, setClients] = useState<Client[]>([]);
+  const [templates, setTemplates] = useState<Template[]>([]);
+  const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
 
   const [name, setName] = useState("");
@@ -42,20 +38,34 @@ function CampaignsPage() {
   const [dateTo, setDateTo] = useState("");
   const [useRepeat, setUseRepeat] = useState(false);
   const [repeatCampaignId, setRepeatCampaignId] = useState("");
+  const [repeatIds, setRepeatIds] = useState<Set<string>>(new Set());
   const [sending, setSending] = useState(false);
   const [progress, setProgress] = useState({ done: 0, total: 0, success: 0, fail: 0 });
 
-  const reload = () => {
-    const all = db.campaigns.getAll();
-    setCampaigns(isEmployee ? all.filter((c) => c.started_by === session?.username) : all);
+  const load = async () => {
+    setLoading(true);
+    try {
+      const [allCampaigns, allClients, allTemplates] = await Promise.all([
+        db.campaigns.getAll(),
+        db.clients.getAll(),
+        db.templates.getAll(),
+      ]);
+      setCampaigns(isEmployee ? allCampaigns.filter((c) => c.started_by === session?.username) : allCampaigns);
+      setClients(allClients);
+      setTemplates(allTemplates);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const countries = useMemo(() => Array.from(new Set(clients.map((c) => c.country))).filter(Boolean).sort(), [clients]);
+  useEffect(() => { load(); }, []);
 
-  const repeatIds = useMemo(() => {
-    if (!useRepeat || !repeatCampaignId) return new Set<string>();
-    return db.sendHistory.getClientIdsByCampaignId(repeatCampaignId);
+  useEffect(() => {
+    if (!useRepeat || !repeatCampaignId) { setRepeatIds(new Set()); return; }
+    db.sendHistory.getClientIdsByCampaignId(repeatCampaignId).then(setRepeatIds);
   }, [useRepeat, repeatCampaignId]);
+
+  const countries = useMemo(() => Array.from(new Set(clients.map((c) => c.country))).filter(Boolean).sort(), [clients]);
 
   const targets = useMemo(() => clients.filter((c) => {
     if (useCountry && country && c.country !== country) return false;
@@ -65,7 +75,7 @@ function CampaignsPage() {
     return true;
   }), [clients, useCountry, country, useDate, dateFrom, dateTo, useRepeat, repeatCampaignId, repeatIds]);
 
-  const reset = () => { setName(""); setTemplateId(""); setUseCountry(false); setCountry(""); setUseDate(false); setDateFrom(""); setDateTo(""); setUseRepeat(false); setRepeatCampaignId(""); };
+  const reset = () => { setName(""); setTemplateId(""); setUseCountry(false); setCountry(""); setUseDate(false); setDateFrom(""); setDateTo(""); setUseRepeat(false); setRepeatCampaignId(""); setRepeatIds(new Set()); };
 
   const startCampaign = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -76,7 +86,7 @@ function CampaignsPage() {
 
     setSending(true);
     setProgress({ done: 0, total: targets.length, success: 0, fail: 0 });
-    const { id: cid } = db.campaigns.insert({
+    const { id: cid } = await db.campaigns.insert({
       name, country: useCountry && country ? country : null,
       template_id: tpl.id, date_from: useDate && dateFrom ? dateFrom : null, date_to: useDate && dateTo ? dateTo : null,
       total_recipients: targets.length, success_count: 0, fail_count: 0,
@@ -88,15 +98,15 @@ function CampaignsPage() {
       const c = targets[i];
       const res = await sendMail({ to: c.email, subject: tpl.subject, html: tpl.html });
       if (res.ok) success++; else fail++;
-      db.sendHistory.insert({ campaign_id: cid, client_id: c.id, client_email: c.email, template_id: tpl.id, template_name: tpl.name, status: res.ok ? "success" : "fail", error: res.error ?? null, sent_by: session?.username ?? "admin" });
+      await db.sendHistory.insert({ campaign_id: cid, client_id: c.id, client_email: c.email, template_id: tpl.id, template_name: tpl.name, status: res.ok ? "success" : "fail", error: res.error ?? null, sent_by: session?.username ?? "admin" });
       setProgress({ done: i + 1, total: targets.length, success, fail });
     }
-    db.campaigns.update(cid, { success_count: success, fail_count: fail, status: fail === targets.length ? "failed" : "completed" });
+    await db.campaigns.update(cid, { success_count: success, fail_count: fail, status: fail === targets.length ? "failed" : "completed" });
     setSending(false);
     toast.success(`Done! ${success} sent, ${fail} failed`);
     setOpen(false);
     reset();
-    reload();
+    await load();
   };
 
   return (
@@ -111,81 +121,86 @@ function CampaignsPage() {
             {isEmployee ? "Your launched campaigns" : "Send email blasts and track delivery results"}
           </p>
         </div>
-        <Dialog open={open} onOpenChange={(v) => { if (!sending) { setOpen(v); if (!v) reset(); } }}>
-          <DialogTrigger asChild>
-            <Button className="gap-1.5 shadow-sm shadow-primary/20" disabled={templates.length === 0 || clients.length === 0}>
-              <Plus className="w-4 h-4" />New Campaign
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
-            <DialogHeader><DialogTitle>Launch New Campaign</DialogTitle></DialogHeader>
-            <form onSubmit={startCampaign} className="space-y-4 pt-1">
-              <div>
-                <Label>Campaign Name *</Label>
-                <Input required value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Diwali Sale 2025" className="mt-1" />
-              </div>
-              <div>
-                <Label>Email Template *</Label>
-                <Select value={templateId} onValueChange={setTemplateId} required>
-                  <SelectTrigger className="mt-1"><SelectValue placeholder="Choose a template" /></SelectTrigger>
-                  <SelectContent>
-                    {templates.map((t) => <SelectItem key={t.id} value={t.id}><div className="font-medium">{t.name}</div></SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label className="text-slate-500 text-xs uppercase tracking-wider">Optional Filters</Label>
-                <FilterBlock icon={Globe} label="Filter by Country" active={useCountry} onToggle={(v) => { setUseCountry(v); if (!v) setCountry(""); }}>
-                  <Select value={country} onValueChange={setCountry}>
-                    <SelectTrigger className="h-8 text-sm mt-2"><SelectValue placeholder="Select country" /></SelectTrigger>
-                    <SelectContent>{countries.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
-                  </Select>
-                </FilterBlock>
-                <FilterBlock icon={Calendar} label="Filter by Date Added" active={useDate} onToggle={(v) => { setUseDate(v); if (!v) { setDateFrom(""); setDateTo(""); } }}>
-                  <div className="grid grid-cols-2 gap-2 mt-2">
-                    <div><Label className="text-xs text-slate-500">From</Label><Input type="date" className="h-8 text-sm mt-0.5" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} /></div>
-                    <div><Label className="text-xs text-slate-500">To</Label><Input type="date" className="h-8 text-sm mt-0.5" value={dateTo} onChange={(e) => setDateTo(e.target.value)} /></div>
-                  </div>
-                </FilterBlock>
-                <FilterBlock icon={Repeat2} label="Repeat from Previous Campaign" active={useRepeat} onToggle={(v) => { setUseRepeat(v); if (!v) setRepeatCampaignId(""); }}>
-                  <Select value={repeatCampaignId} onValueChange={setRepeatCampaignId}>
-                    <SelectTrigger className="h-8 text-sm mt-2"><SelectValue placeholder="Select previous campaign" /></SelectTrigger>
-                    <SelectContent>{campaigns.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
-                  </Select>
-                </FilterBlock>
-              </div>
-
-              <div className={cn("rounded-xl border-2 p-4 text-sm text-center font-medium transition-colors",
-                targets.length === 0 ? "border-red-200 bg-red-50 text-red-700" : "border-emerald-200 bg-emerald-50 text-emerald-700")}>
-                <span className="text-2xl font-bold">{targets.length}</span>
-                <span className="ml-1.5">client(s) will receive this email</span>
-              </div>
-
-              {sending && (
-                <div className="space-y-2">
-                  <Progress value={(progress.done / Math.max(progress.total, 1)) * 100} className="h-2" />
-                  <div className="flex justify-between text-xs text-slate-500">
-                    <span>{progress.done}/{progress.total} processed</span>
-                    <span>
-                      <span className="text-emerald-600 font-semibold">{progress.success} sent</span>
-                      {" · "}
-                      <span className="text-red-600 font-semibold">{progress.fail} failed</span>
-                    </span>
-                  </div>
-                </div>
-              )}
-
-              <Button type="submit" className="w-full h-10" disabled={sending || targets.length === 0}>
-                <Send className="w-4 h-4 mr-2" />
-                {sending ? "Sending…" : `Launch Campaign · ${targets.length} recipients`}
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" className="gap-1.5" onClick={() => load()} disabled={loading}>
+            <RefreshCw className={cn("w-4 h-4", loading && "animate-spin")} />Refresh
+          </Button>
+          <Dialog open={open} onOpenChange={(v) => { if (!sending) { setOpen(v); if (!v) reset(); } }}>
+            <DialogTrigger asChild>
+              <Button className="gap-1.5 shadow-sm shadow-primary/20" disabled={templates.length === 0 || clients.length === 0}>
+                <Plus className="w-4 h-4" />New Campaign
               </Button>
-            </form>
-          </DialogContent>
-        </Dialog>
+            </DialogTrigger>
+            <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+              <DialogHeader><DialogTitle>Launch New Campaign</DialogTitle></DialogHeader>
+              <form onSubmit={startCampaign} className="space-y-4 pt-1">
+                <div>
+                  <Label>Campaign Name *</Label>
+                  <Input required value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Diwali Sale 2025" className="mt-1" />
+                </div>
+                <div>
+                  <Label>Email Template *</Label>
+                  <Select value={templateId} onValueChange={setTemplateId} required>
+                    <SelectTrigger className="mt-1"><SelectValue placeholder="Choose a template" /></SelectTrigger>
+                    <SelectContent>
+                      {templates.map((t) => <SelectItem key={t.id} value={t.id}><div className="font-medium">{t.name}</div></SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label className="text-slate-500 text-xs uppercase tracking-wider">Optional Filters</Label>
+                  <FilterBlock icon={Globe} label="Filter by Country" active={useCountry} onToggle={(v) => { setUseCountry(v); if (!v) setCountry(""); }}>
+                    <Select value={country} onValueChange={setCountry}>
+                      <SelectTrigger className="h-8 text-sm mt-2"><SelectValue placeholder="Select country" /></SelectTrigger>
+                      <SelectContent>{countries.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+                    </Select>
+                  </FilterBlock>
+                  <FilterBlock icon={Calendar} label="Filter by Date Added" active={useDate} onToggle={(v) => { setUseDate(v); if (!v) { setDateFrom(""); setDateTo(""); } }}>
+                    <div className="grid grid-cols-2 gap-2 mt-2">
+                      <div><Label className="text-xs text-slate-500">From</Label><Input type="date" className="h-8 text-sm mt-0.5" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} /></div>
+                      <div><Label className="text-xs text-slate-500">To</Label><Input type="date" className="h-8 text-sm mt-0.5" value={dateTo} onChange={(e) => setDateTo(e.target.value)} /></div>
+                    </div>
+                  </FilterBlock>
+                  <FilterBlock icon={Repeat2} label="Repeat from Previous Campaign" active={useRepeat} onToggle={(v) => { setUseRepeat(v); if (!v) setRepeatCampaignId(""); }}>
+                    <Select value={repeatCampaignId} onValueChange={setRepeatCampaignId}>
+                      <SelectTrigger className="h-8 text-sm mt-2"><SelectValue placeholder="Select previous campaign" /></SelectTrigger>
+                      <SelectContent>{campaigns.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
+                    </Select>
+                  </FilterBlock>
+                </div>
+
+                <div className={cn("rounded-xl border-2 p-4 text-sm text-center font-medium transition-colors",
+                  targets.length === 0 ? "border-red-200 bg-red-50 text-red-700" : "border-emerald-200 bg-emerald-50 text-emerald-700")}>
+                  <span className="text-2xl font-bold">{targets.length}</span>
+                  <span className="ml-1.5">client(s) will receive this email</span>
+                </div>
+
+                {sending && (
+                  <div className="space-y-2">
+                    <Progress value={(progress.done / Math.max(progress.total, 1)) * 100} className="h-2" />
+                    <div className="flex justify-between text-xs text-slate-500">
+                      <span>{progress.done}/{progress.total} processed</span>
+                      <span>
+                        <span className="text-emerald-600 font-semibold">{progress.success} sent</span>
+                        {" · "}
+                        <span className="text-red-600 font-semibold">{progress.fail} failed</span>
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                <Button type="submit" className="w-full h-10" disabled={sending || targets.length === 0}>
+                  <Send className="w-4 h-4 mr-2" />
+                  {sending ? "Sending…" : `Launch Campaign · ${targets.length} recipients`}
+                </Button>
+              </form>
+            </DialogContent>
+          </Dialog>
+        </div>
       </div>
 
-      {(templates.length === 0 || clients.length === 0) && (
+      {!loading && (templates.length === 0 || clients.length === 0) && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
           You need at least one template and one client before you can start a campaign.
         </div>
@@ -207,7 +222,13 @@ function CampaignsPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-              {campaigns.length === 0 ? (
+              {loading ? (
+                <tr>
+                  <td colSpan={!isEmployee ? 8 : 7} className="px-4 py-14 text-center">
+                    <div className="flex justify-center"><div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" /></div>
+                  </td>
+                </tr>
+              ) : campaigns.length === 0 ? (
                 <tr>
                   <td colSpan={!isEmployee ? 8 : 7} className="px-4 py-14 text-center">
                     <div className="flex flex-col items-center gap-2">

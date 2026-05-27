@@ -27,15 +27,25 @@ function LoginPage() {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    await new Promise((r) => setTimeout(r, 350));
-    const employee = db.employees.getByUsername(username.trim());
-    setLoading(false);
-    if (!employee || employee.password !== password) {
-      toast.error("Invalid username or password");
-      return;
+    try {
+      const employee = await db.employees.getByUsername(username.trim());
+      if (!employee || employee.password !== password) {
+        toast.error("Invalid username or password");
+        return;
+      }
+      setSession({
+        id: employee.id,
+        username: employee.username,
+        name: employee.name,
+        role: employee.role,
+        permissions: employee.permissions,
+      });
+      navigate({ to: "/app" });
+    } catch {
+      toast.error("Connection error. Please try again.");
+    } finally {
+      setLoading(false);
     }
-    setSession({ id: employee.id, username: employee.username, name: employee.name, role: employee.role, permissions: employee.permissions });
-    navigate({ to: "/app" });
   };
 
   return (

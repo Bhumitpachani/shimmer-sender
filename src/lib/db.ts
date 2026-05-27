@@ -1,10 +1,15 @@
-const KEYS = {
-  employees: "sj_employees",
-  clients: "sj_clients",
-  templates: "sj_templates",
-  campaigns: "sj_campaigns",
-  sendHistory: "sj_send_history",
-};
+import {
+  collection,
+  doc,
+  getDocs,
+  getDoc,
+  setDoc,
+  updateDoc,
+  deleteDoc,
+  query,
+  where,
+} from "firebase/firestore";
+import { firestoreDb } from "./firebase";
 
 function uid(): string {
   return crypto.randomUUID();
@@ -12,19 +17,6 @@ function uid(): string {
 
 function now(): string {
   return new Date().toISOString();
-}
-
-function read<T>(key: string): T[] {
-  if (typeof window === "undefined") return [];
-  try {
-    return JSON.parse(localStorage.getItem(key) ?? "[]") as T[];
-  } catch {
-    return [];
-  }
-}
-
-function write<T>(key: string, data: T[]): void {
-  localStorage.setItem(key, JSON.stringify(data));
 }
 
 export const ALL_PERMISSIONS = ["dashboard", "clients", "campaigns", "templates"] as const;
@@ -90,167 +82,218 @@ export interface SendHistory {
   sent_at: string;
 }
 
-function seed() {
-  const employees = read<Employee>(KEYS.employees);
-  if (employees.length === 0) {
-    write<Employee>(KEYS.employees, [
-      {
-        id: uid(),
-        username: "admin",
-        password: "123",
-        name: "Administrator",
-        role: "admin",
-        permissions: [...ALL_PERMISSIONS],
-        created_at: now(),
-      },
-    ]);
-  }
-}
-
-if (typeof window !== "undefined") seed();
-
-function normalizeEmployee(e: any): Employee {
+function normalizeEmployee(data: any): Employee {
   return {
-    ...e,
-    permissions: Array.isArray(e.permissions) ? e.permissions : ["clients", "campaigns"],
+    ...data,
+    permissions: Array.isArray(data.permissions) ? data.permissions : ["clients", "campaigns"],
   };
 }
 
+async function seed() {
+  const snap = await getDocs(collection(firestoreDb, "employees"));
+  if (snap.empty) {
+    const adminId = uid();
+    await setDoc(doc(firestoreDb, "employees", adminId), {
+      id: adminId,
+      username: "admin",
+      password: "123",
+      name: "Administrator",
+      role: "admin",
+      permissions: [...ALL_PERMISSIONS],
+      created_at: now(),
+    });
+  }
+}
+seed().catch(console.error);
+
 export const db = {
   employees: {
-    getAll(): Employee[] {
-      return read<any>(KEYS.employees)
-        .map(normalizeEmployee)
+    async getAll(): Promise<Employee[]> {
+      const snap = await getDocs(collection(firestoreDb, "employees"));
+      return snap.docs
+        .map((d) => normalizeEmployee(d.data()))
         .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
     },
-    getByUsername(username: string): Employee | null {
-      const e = read<any>(KEYS.employees).find((e) => e.username === username);
-      return e ? normalizeEmployee(e) : null;
+    async getByUsername(username: string): Promise<Employee | null> {
+      const snap = await getDocs(
+        query(collection(firestoreDb, "employees"), where("username", "==", username))
+      );
+      if (snap.empty) return null;
+      return normalizeEmployee(snap.docs[0].data());
     },
-    getById(id: string): Employee | null {
-      const e = read<any>(KEYS.employees).find((e) => e.id === id);
-      return e ? normalizeEmployee(e) : null;
+    async getById(id: string): Promise<Employee | null> {
+      const d = await getDoc(doc(firestoreDb, "employees", id));
+      if (!d.exists()) return null;
+      return normalizeEmployee(d.data());
     },
-    insert(data: Omit<Employee, "id" | "created_at">): { error: string | null } {
-      const all = read<any>(KEYS.employees);
-      if (all.some((e: any) => e.username === data.username)) {
-        return { error: "23505" };
-      }
-      all.push({ ...data, id: uid(), created_at: now() });
-      write(KEYS.employees, all);
+    async insert(data: Omit<Employee, "id" | "created_at">): Promise<{ error: string | null }> {
+      const existing = await getDocs(
+        query(collection(firestoreDb, "employees"), where("username", "==", data.username))
+      );
+      if (!existing.empty) return { error: "23505" };
+      const id = uid();
+      await setDoc(doc(firestoreDb, "employees", id), { ...data, id, created_at: now() });
       return { error: null };
     },
-    delete(id: string): { error: string | null } {
-      const all = read<any>(KEYS.employees).filter((e: any) => e.id !== id);
-      write(KEYS.employees, all);
+    async delete(id: string): Promise<{ error: string | null }> {
+      await deleteDoc(doc(firestoreDb, "employees", id));
       return { error: null };
     },
   },
 
   clients: {
-    getAll(): Client[] {
-      return read<Client>(KEYS.clients).sort(
-        (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    async getAll(): Promise<Client[]> {
+      const snap = await getDocs(collection(firestoreDb, "clients"));
+      return snap.docs
+        .map((d) => d.data() as Client)
+        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    },
+    async getById(id: string): Promise<Client | null> {
+      const d = await getDoc(doc(firestoreDb, "clients", id));
+      if (!d.exists()) return null;
+      return d.data() as Client;
+    },
+    async insert(data: Omit<Client, "id" | "created_at">): Promise<{ error: string | null }> {
+      const emailSnap = await getDocs(
+        query(collection(firestoreDb, "clients"), where("email", "==", data.email))
       );
-    },
-    getById(id: string): Client | null {
-      return read<Client>(KEYS.clients).find((c) => c.id === id) ?? null;
-    },
-    insert(data: Omit<Client, "id" | "created_at">): { error: string | null } {
-      const all = read<Client>(KEYS.clients);
-      if (all.some((c) => c.email === data.email)) return { error: "23505_email" };
-      if (all.some((c) => c.mobile === data.mobile)) return { error: "23505_mobile" };
-      all.push({ ...data, id: uid(), created_at: now() });
-      write(KEYS.clients, all);
+      if (!emailSnap.empty) return { error: "23505_email" };
+      const mobileSnap = await getDocs(
+        query(collection(firestoreDb, "clients"), where("mobile", "==", data.mobile))
+      );
+      if (!mobileSnap.empty) return { error: "23505_mobile" };
+      const id = uid();
+      await setDoc(doc(firestoreDb, "clients", id), { ...data, id, created_at: now() });
       return { error: null };
     },
-    delete(id: string): { error: string | null } {
-      write(KEYS.clients, read<Client>(KEYS.clients).filter((c) => c.id !== id));
+    async upsertByEmail(
+      data: Omit<Client, "id" | "created_at">
+    ): Promise<{ action: "inserted" | "updated"; error: string | null }> {
+      const snap = await getDocs(
+        query(collection(firestoreDb, "clients"), where("email", "==", data.email))
+      );
+      if (!snap.empty) {
+        const existing = snap.docs[0];
+        await updateDoc(doc(firestoreDb, "clients", existing.id), {
+          name: data.name,
+          mobile: data.mobile,
+          country: data.country,
+          state: data.state ?? null,
+          website: data.website ?? null,
+          company: data.company ?? null,
+          added_by: data.added_by,
+        });
+        return { action: "updated", error: null };
+      }
+      const id = uid();
+      await setDoc(doc(firestoreDb, "clients", id), { ...data, id, created_at: now() });
+      return { action: "inserted", error: null };
+    },
+    async delete(id: string): Promise<{ error: string | null }> {
+      await deleteDoc(doc(firestoreDb, "clients", id));
       return { error: null };
     },
   },
 
   templates: {
-    getAll(): Template[] {
-      return read<Template>(KEYS.templates).sort(
-        (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-      );
+    async getAll(): Promise<Template[]> {
+      const snap = await getDocs(collection(firestoreDb, "templates"));
+      return snap.docs
+        .map((d) => d.data() as Template)
+        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
     },
-    getById(id: string): Template | null {
-      return read<Template>(KEYS.templates).find((t) => t.id === id) ?? null;
+    async getById(id: string): Promise<Template | null> {
+      const d = await getDoc(doc(firestoreDb, "templates", id));
+      if (!d.exists()) return null;
+      return d.data() as Template;
     },
-    insert(data: Omit<Template, "id" | "created_at">): { error: string | null } {
-      const all = read<Template>(KEYS.templates);
-      all.push({ ...data, id: uid(), created_at: now() });
-      write(KEYS.templates, all);
+    async insert(data: Omit<Template, "id" | "created_at">): Promise<{ error: string | null }> {
+      const id = uid();
+      await setDoc(doc(firestoreDb, "templates", id), { ...data, id, created_at: now() });
       return { error: null };
     },
-    update(id: string, data: Partial<Omit<Template, "id" | "created_at">>): { error: string | null } {
-      const all = read<Template>(KEYS.templates).map((t) =>
-        t.id === id ? { ...t, ...data } : t
-      );
-      write(KEYS.templates, all);
+    async update(
+      id: string,
+      data: Partial<Omit<Template, "id" | "created_at">>
+    ): Promise<{ error: string | null }> {
+      await updateDoc(doc(firestoreDb, "templates", id), data as any);
       return { error: null };
     },
-    delete(id: string): { error: string | null } {
-      write(KEYS.templates, read<Template>(KEYS.templates).filter((t) => t.id !== id));
+    async delete(id: string): Promise<{ error: string | null }> {
+      await deleteDoc(doc(firestoreDb, "templates", id));
       return { error: null };
     },
   },
 
   campaigns: {
-    getAll(): Campaign[] {
-      return read<Campaign>(KEYS.campaigns).sort(
-        (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-      );
+    async getAll(): Promise<Campaign[]> {
+      const snap = await getDocs(collection(firestoreDb, "campaigns"));
+      return snap.docs
+        .map((d) => d.data() as Campaign)
+        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
     },
-    getById(id: string): Campaign | null {
-      return read<Campaign>(KEYS.campaigns).find((c) => c.id === id) ?? null;
+    async getById(id: string): Promise<Campaign | null> {
+      const d = await getDoc(doc(firestoreDb, "campaigns", id));
+      if (!d.exists()) return null;
+      return d.data() as Campaign;
     },
-    insert(data: Omit<Campaign, "id" | "created_at">): { id: string; error: string | null } {
-      const all = read<Campaign>(KEYS.campaigns);
-      const record: Campaign = { ...data, id: uid(), created_at: now() };
-      all.push(record);
-      write(KEYS.campaigns, all);
-      return { id: record.id, error: null };
+    async insert(
+      data: Omit<Campaign, "id" | "created_at">
+    ): Promise<{ id: string; error: string | null }> {
+      const id = uid();
+      await setDoc(doc(firestoreDb, "campaigns", id), { ...data, id, created_at: now() });
+      return { id, error: null };
     },
-    update(id: string, data: Partial<Omit<Campaign, "id" | "created_at">>): { error: string | null } {
-      const all = read<Campaign>(KEYS.campaigns).map((c) =>
-        c.id === id ? { ...c, ...data } : c
-      );
-      write(KEYS.campaigns, all);
+    async update(
+      id: string,
+      data: Partial<Omit<Campaign, "id" | "created_at">>
+    ): Promise<{ error: string | null }> {
+      await updateDoc(doc(firestoreDb, "campaigns", id), data as any);
       return { error: null };
     },
   },
 
   sendHistory: {
-    getAll(): SendHistory[] {
-      return read<SendHistory>(KEYS.sendHistory);
+    async getAll(): Promise<SendHistory[]> {
+      const snap = await getDocs(collection(firestoreDb, "sendHistory"));
+      return snap.docs.map((d) => d.data() as SendHistory);
     },
-    getByCampaignId(campaignId: string): SendHistory[] {
-      return read<SendHistory>(KEYS.sendHistory)
-        .filter((h) => h.campaign_id === campaignId)
+    async getByCampaignId(campaignId: string): Promise<SendHistory[]> {
+      const snap = await getDocs(
+        query(collection(firestoreDb, "sendHistory"), where("campaign_id", "==", campaignId))
+      );
+      return snap.docs
+        .map((d) => d.data() as SendHistory)
         .sort((a, b) => new Date(a.sent_at).getTime() - new Date(b.sent_at).getTime());
     },
-    getByClientId(clientId: string): SendHistory[] {
-      return read<SendHistory>(KEYS.sendHistory)
-        .filter((h) => h.client_id === clientId)
+    async getByClientId(clientId: string): Promise<SendHistory[]> {
+      const snap = await getDocs(
+        query(collection(firestoreDb, "sendHistory"), where("client_id", "==", clientId))
+      );
+      return snap.docs
+        .map((d) => d.data() as SendHistory)
         .sort((a, b) => new Date(b.sent_at).getTime() - new Date(a.sent_at).getTime());
     },
-    getClientIdsByCampaignId(campaignId: string): Set<string> {
+    async getClientIdsByCampaignId(campaignId: string): Promise<Set<string>> {
+      const snap = await getDocs(
+        query(collection(firestoreDb, "sendHistory"), where("campaign_id", "==", campaignId))
+      );
       return new Set(
-        read<SendHistory>(KEYS.sendHistory)
-          .filter((h) => h.campaign_id === campaignId && h.client_id)
+        snap.docs
+          .map((d) => d.data() as SendHistory)
+          .filter((h) => h.client_id)
           .map((h) => h.client_id as string)
       );
     },
-    insert(data: Omit<SendHistory, "id" | "sent_at">): void {
-      const all = read<SendHistory>(KEYS.sendHistory);
-      all.push({ ...data, id: uid(), sent_at: now() });
-      write(KEYS.sendHistory, all);
+    async insert(data: Omit<SendHistory, "id" | "sent_at">): Promise<void> {
+      const id = uid();
+      await setDoc(doc(firestoreDb, "sendHistory", id), { ...data, id, sent_at: now() });
     },
-    countByStatus(status: "success" | "fail"): number {
-      return read<SendHistory>(KEYS.sendHistory).filter((h) => h.status === status).length;
+    async countByStatus(status: "success" | "fail"): Promise<number> {
+      const snap = await getDocs(
+        query(collection(firestoreDb, "sendHistory"), where("status", "==", status))
+      );
+      return snap.size;
     },
   },
 };
