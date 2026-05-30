@@ -150,11 +150,6 @@ function LoginPage() {
                 ) : "Sign In"}
               </Button>
             </form>
-            <div className="mt-6 pt-5 border-t border-slate-100 text-center">
-              <p className="text-xs text-slate-400">
-                Default admin: <span className="font-mono font-medium text-slate-600">admin</span> / <span className="font-mono font-medium text-slate-600">123</span>
-              </p>
-            </div>
           </div>
         </div>
       </div>
