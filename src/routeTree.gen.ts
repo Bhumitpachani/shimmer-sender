@@ -61,22 +61,22 @@ const AppCampaignsRoute = AppCampaignsRouteImport.update({
   getParentRoute: () => AppRoute,
 } as any)
 const AppClientsIdRoute = AppClientsIdRouteImport.update({
-  id: '/$id',
-  path: '/$id',
-  getParentRoute: () => AppClientsRoute,
+  id: '/clients/$id',
+  path: '/clients/$id',
+  getParentRoute: () => AppRoute,
 } as any)
 const AppCampaignsIdRoute = AppCampaignsIdRouteImport.update({
-  id: '/$id',
-  path: '/$id',
-  getParentRoute: () => AppCampaignsRoute,
+  id: '/campaigns/$id',
+  path: '/campaigns/$id',
+  getParentRoute: () => AppRoute,
 } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/app': typeof AppRouteWithChildren
   '/login': typeof LoginRoute
-  '/app/campaigns': typeof AppCampaignsRouteWithChildren
-  '/app/clients': typeof AppClientsRouteWithChildren
+  '/app/campaigns': typeof AppCampaignsRoute
+  '/app/clients': typeof AppClientsRoute
   '/app/employees': typeof AppEmployeesRoute
   '/app/templates': typeof AppTemplatesRoute
   '/app/': typeof AppIndexRoute
@@ -86,8 +86,8 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
-  '/app/campaigns': typeof AppCampaignsRouteWithChildren
-  '/app/clients': typeof AppClientsRouteWithChildren
+  '/app/campaigns': typeof AppCampaignsRoute
+  '/app/clients': typeof AppClientsRoute
   '/app/employees': typeof AppEmployeesRoute
   '/app/templates': typeof AppTemplatesRoute
   '/app': typeof AppIndexRoute
@@ -99,8 +99,8 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/app': typeof AppRouteWithChildren
   '/login': typeof LoginRoute
-  '/app/campaigns': typeof AppCampaignsRouteWithChildren
-  '/app/clients': typeof AppClientsRouteWithChildren
+  '/app/campaigns': typeof AppCampaignsRoute
+  '/app/clients': typeof AppClientsRoute
   '/app/employees': typeof AppEmployeesRoute
   '/app/templates': typeof AppTemplatesRoute
   '/app/': typeof AppIndexRoute
@@ -211,59 +211,39 @@ declare module '@tanstack/react-router' {
     }
     '/app/clients/$id': {
       id: '/app/clients/$id'
-      path: '/$id'
+      path: '/clients/$id'
       fullPath: '/app/clients/$id'
       preLoaderRoute: typeof AppClientsIdRouteImport
-      parentRoute: typeof AppClientsRoute
+      parentRoute: typeof AppRoute
     }
     '/app/campaigns/$id': {
       id: '/app/campaigns/$id'
-      path: '/$id'
+      path: '/campaigns/$id'
       fullPath: '/app/campaigns/$id'
       preLoaderRoute: typeof AppCampaignsIdRouteImport
-      parentRoute: typeof AppCampaignsRoute
+      parentRoute: typeof AppRoute
     }
   }
 }
 
-interface AppCampaignsRouteChildren {
-  AppCampaignsIdRoute: typeof AppCampaignsIdRoute
-}
-
-const AppCampaignsRouteChildren: AppCampaignsRouteChildren = {
-  AppCampaignsIdRoute: AppCampaignsIdRoute,
-}
-
-const AppCampaignsRouteWithChildren = AppCampaignsRoute._addFileChildren(
-  AppCampaignsRouteChildren,
-)
-
-interface AppClientsRouteChildren {
-  AppClientsIdRoute: typeof AppClientsIdRoute
-}
-
-const AppClientsRouteChildren: AppClientsRouteChildren = {
-  AppClientsIdRoute: AppClientsIdRoute,
-}
-
-const AppClientsRouteWithChildren = AppClientsRoute._addFileChildren(
-  AppClientsRouteChildren,
-)
-
 interface AppRouteChildren {
-  AppCampaignsRoute: typeof AppCampaignsRouteWithChildren
-  AppClientsRoute: typeof AppClientsRouteWithChildren
+  AppCampaignsRoute: typeof AppCampaignsRoute
+  AppClientsRoute: typeof AppClientsRoute
   AppEmployeesRoute: typeof AppEmployeesRoute
   AppTemplatesRoute: typeof AppTemplatesRoute
   AppIndexRoute: typeof AppIndexRoute
+  AppCampaignsIdRoute: typeof AppCampaignsIdRoute
+  AppClientsIdRoute: typeof AppClientsIdRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
-  AppCampaignsRoute: AppCampaignsRouteWithChildren,
-  AppClientsRoute: AppClientsRouteWithChildren,
+  AppCampaignsRoute: AppCampaignsRoute,
+  AppClientsRoute: AppClientsRoute,
   AppEmployeesRoute: AppEmployeesRoute,
   AppTemplatesRoute: AppTemplatesRoute,
   AppIndexRoute: AppIndexRoute,
+  AppCampaignsIdRoute: AppCampaignsIdRoute,
+  AppClientsIdRoute: AppClientsIdRoute,
 }
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
