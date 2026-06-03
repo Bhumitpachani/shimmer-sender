@@ -92,7 +92,9 @@ function normalizeEmployee(data: any): Employee {
 }
 
 async function seed() {
-  const snap = await getDocs(collection(firestoreDb, "employees"));
+  const snap = await getDocs(
+    query(collection(firestoreDb, "employees"), where("username", "==", "admin"))
+  );
   if (snap.empty) {
     const adminId = uid();
     await setDoc(doc(firestoreDb, "employees", adminId), {
@@ -104,6 +106,13 @@ async function seed() {
       permissions: [...ALL_PERMISSIONS],
       created_at: now(),
     });
+  } else if (snap.docs.length > 1) {
+    const sorted = snap.docs.slice().sort((a, b) =>
+      new Date(a.data().created_at).getTime() - new Date(b.data().created_at).getTime()
+    );
+    for (const d of sorted.slice(1)) {
+      await deleteDoc(doc(firestoreDb, "employees", d.id));
+    }
   }
 }
 seed().catch(console.error);
@@ -135,6 +144,16 @@ export const db = {
       if (!existing.empty) return { error: "23505" };
       const id = uid();
       await setDoc(doc(firestoreDb, "employees", id), { ...data, id, created_at: now() });
+      return { error: null };
+    },
+    async update(id: string, data: Partial<Omit<Employee, "id" | "created_at">>): Promise<{ error: string | null }> {
+      if (data.username) {
+        const snap = await getDocs(
+          query(collection(firestoreDb, "employees"), where("username", "==", data.username))
+        );
+        if (!snap.empty && snap.docs[0].id !== id) return { error: "23505" };
+      }
+      await setDoc(doc(firestoreDb, "employees", id), data, { merge: true });
       return { error: null };
     },
     async delete(id: string): Promise<{ error: string | null }> {

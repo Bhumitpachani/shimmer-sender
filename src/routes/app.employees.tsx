@@ -5,8 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Plus, ShieldCheck, User, Trash2, MoreHorizontal, Users, LayoutDashboard, Users as UsersIcon, Send, Mail } from "lucide-react";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Plus, ShieldCheck, User, Trash2, MoreHorizontal, Users, LayoutDashboard, Users as UsersIcon, Send, Mail, Pencil } from "lucide-react";
 import { toast } from "sonner";
 import { getSession } from "@/lib/session";
 
@@ -25,15 +25,52 @@ const AVATAR_COLORS = ["bg-red-400","bg-orange-400","bg-amber-400","bg-lime-500"
 function getAvatarColor(name: string) { return AVATAR_COLORS[name.charCodeAt(0) % AVATAR_COLORS.length]; }
 function cn(...cls: (string | boolean | undefined | null)[]) { return cls.filter(Boolean).join(" "); }
 
+function PermissionGrid({ value, onChange }: { value: Permission[]; onChange: (p: Permission[]) => void }) {
+  const toggle = (p: Permission) =>
+    onChange(value.includes(p) ? value.filter((x) => x !== p) : [...value, p]);
+  return (
+    <div className="grid grid-cols-2 gap-2">
+      {PERMISSION_META.map(({ key, label, icon: Icon, desc }) => {
+        const checked = value.includes(key);
+        return (
+          <button
+            key={key}
+            type="button"
+            onClick={() => toggle(key)}
+            className={cn(
+              "flex items-start gap-2.5 p-2.5 rounded-lg border text-left transition-all",
+              checked ? "border-primary/50 bg-primary/5 text-primary" : "border-slate-200 bg-slate-50 text-slate-500 hover:border-slate-300"
+            )}
+          >
+            <div className={cn("w-6 h-6 rounded flex items-center justify-center shrink-0 mt-0.5", checked ? "bg-primary/15" : "bg-slate-200")}>
+              <Icon className="w-3.5 h-3.5" />
+            </div>
+            <div>
+              <div className={cn("text-xs font-semibold", checked ? "text-primary" : "text-slate-700")}>{label}</div>
+              <div className="text-[10px] text-slate-400 leading-tight">{desc}</div>
+            </div>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function EmployeesPage() {
   const session = getSession();
   const navigate = useNavigate();
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
-  const [open, setOpen] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ name: "", username: "", password: "" });
-  const [permissions, setPermissions] = useState<Permission[]>(["clients", "campaigns"]);
+
+  const [addOpen, setAddOpen] = useState(false);
+  const [addSaving, setAddSaving] = useState(false);
+  const [addForm, setAddForm] = useState({ name: "", username: "", password: "" });
+  const [addPerms, setAddPerms] = useState<Permission[]>(["clients", "campaigns"]);
+
+  const [editTarget, setEditTarget] = useState<Employee | null>(null);
+  const [editSaving, setEditSaving] = useState(false);
+  const [editForm, setEditForm] = useState({ name: "", username: "", password: "" });
+  const [editPerms, setEditPerms] = useState<Permission[]>([]);
 
   useEffect(() => {
     if (session && session.role !== "admin") navigate({ to: "/app/clients" });
@@ -41,45 +78,61 @@ function EmployeesPage() {
 
   const load = async () => {
     setLoading(true);
-    try {
-      setEmployees(await db.employees.getAll());
-    } finally {
-      setLoading(false);
-    }
+    try { setEmployees(await db.employees.getAll()); }
+    finally { setLoading(false); }
   };
 
   useEffect(() => { load(); }, []);
 
-  const togglePerm = (p: Permission) => {
-    setPermissions((prev) => prev.includes(p) ? prev.filter((x) => x !== p) : [...prev, p]);
+  const openEdit = (e: Employee) => {
+    setEditTarget(e);
+    setEditForm({ name: e.name, username: e.username, password: e.password });
+    setEditPerms([...e.permissions]);
   };
 
-  const handleAdd = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (permissions.length === 0) { toast.error("Grant at least one permission"); return; }
-    setSaving(true);
+  const handleAdd = async (ev: React.FormEvent) => {
+    ev.preventDefault();
+    if (addPerms.length === 0) { toast.error("Grant at least one permission"); return; }
+    setAddSaving(true);
     try {
       const { error } = await db.employees.insert({
-        name: form.name.trim(),
-        username: form.username.trim(),
-        password: form.password,
+        name: addForm.name.trim(),
+        username: addForm.username.trim(),
+        password: addForm.password,
         role: "employee",
-        permissions,
+        permissions: addPerms,
       });
       if (error === "23505") { toast.error("Username already taken"); return; }
       if (error) { toast.error(error); return; }
       toast.success("Employee added");
-      setForm({ name: "", username: "", password: "" });
-      setPermissions(["clients", "campaigns"]);
-      setOpen(false);
+      setAddForm({ name: "", username: "", password: "" });
+      setAddPerms(["clients", "campaigns"]);
+      setAddOpen(false);
       await load();
-    } finally {
-      setSaving(false);
-    }
+    } finally { setAddSaving(false); }
   };
 
-  const handleDelete = async (id: string, name: string, role: string) => {
-    if (role === "admin") { toast.error("Cannot delete the admin account"); return; }
+  const handleEdit = async (ev: React.FormEvent) => {
+    ev.preventDefault();
+    if (!editTarget) return;
+    if (editPerms.length === 0) { toast.error("Grant at least one permission"); return; }
+    setEditSaving(true);
+    try {
+      const { error } = await db.employees.update(editTarget.id, {
+        name: editForm.name.trim(),
+        username: editForm.username.trim(),
+        password: editForm.password,
+        permissions: editPerms,
+      });
+      if (error === "23505") { toast.error("Username already taken"); return; }
+      if (error) { toast.error(error); return; }
+      toast.success("Employee updated");
+      setEditTarget(null);
+      await load();
+    } finally { setEditSaving(false); }
+  };
+
+  const handleDelete = async (id: string, name: string) => {
     if (!confirm(`Remove "${name}" from the team?`)) return;
     await db.employees.delete(id);
     toast.success("Employee removed");
@@ -101,53 +154,51 @@ function EmployeesPage() {
           </div>
           <p className="text-sm text-slate-500 mt-0.5">Manage team access and credentials</p>
         </div>
-        <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) { setForm({ name: "", username: "", password: "" }); setPermissions(["clients", "campaigns"]); } }}>
+
+        <Dialog open={addOpen} onOpenChange={(v) => { setAddOpen(v); if (!v) { setAddForm({ name: "", username: "", password: "" }); setAddPerms(["clients", "campaigns"]); } }}>
           <DialogTrigger asChild>
             <Button className="gap-1.5 shadow-sm shadow-primary/20"><Plus className="w-4 h-4" />Add Employee</Button>
           </DialogTrigger>
           <DialogContent className="max-w-sm">
             <DialogHeader><DialogTitle>Add New Employee</DialogTitle></DialogHeader>
             <form onSubmit={handleAdd} className="space-y-3 pt-1">
-              <div><Label>Full Name *</Label><Input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} autoFocus className="mt-1.5" placeholder="e.g. Rahul Sharma" /></div>
-              <div><Label>Username *</Label><Input required value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} className="mt-1.5" placeholder="unique username" /></div>
-              <div><Label>Password *</Label><Input required value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} className="mt-1.5" placeholder="set a password" /></div>
-
+              <div><Label>Full Name *</Label><Input required value={addForm.name} onChange={(e) => setAddForm({ ...addForm, name: e.target.value })} autoFocus className="mt-1.5" placeholder="e.g. Rahul Sharma" /></div>
+              <div><Label>Username *</Label><Input required value={addForm.username} onChange={(e) => setAddForm({ ...addForm, username: e.target.value })} className="mt-1.5" placeholder="unique username" /></div>
+              <div><Label>Password *</Label><Input required value={addForm.password} onChange={(e) => setAddForm({ ...addForm, password: e.target.value })} className="mt-1.5" placeholder="set a password" /></div>
               <div>
                 <Label className="block mb-2">Sidebar Access *</Label>
-                <div className="grid grid-cols-2 gap-2">
-                  {PERMISSION_META.map(({ key, label, icon: Icon, desc }) => {
-                    const checked = permissions.includes(key);
-                    return (
-                      <button
-                        key={key}
-                        type="button"
-                        onClick={() => togglePerm(key)}
-                        className={cn(
-                          "flex items-start gap-2.5 p-2.5 rounded-lg border text-left transition-all",
-                          checked ? "border-primary/50 bg-primary/5 text-primary" : "border-slate-200 bg-slate-50 text-slate-500 hover:border-slate-300"
-                        )}
-                      >
-                        <div className={cn("w-6 h-6 rounded flex items-center justify-center shrink-0 mt-0.5", checked ? "bg-primary/15" : "bg-slate-200")}>
-                          <Icon className="w-3.5 h-3.5" />
-                        </div>
-                        <div>
-                          <div className={cn("text-xs font-semibold", checked ? "text-primary" : "text-slate-700")}>{label}</div>
-                          <div className="text-[10px] text-slate-400 leading-tight">{desc}</div>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-                {permissions.length === 0 && <p className="text-xs text-red-500 mt-1.5">Select at least one section.</p>}
+                <PermissionGrid value={addPerms} onChange={setAddPerms} />
+                {addPerms.length === 0 && <p className="text-xs text-red-500 mt-1.5">Select at least one section.</p>}
               </div>
-
-              <Button type="submit" className="w-full" disabled={saving}>
-                {saving ? <span className="flex items-center gap-2"><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />Creating…</span> : "Create Employee"}
+              <Button type="submit" className="w-full" disabled={addSaving}>
+                {addSaving ? <span className="flex items-center gap-2"><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />Creating…</span> : "Create Employee"}
               </Button>
             </form>
           </DialogContent>
         </Dialog>
       </div>
+
+      <Dialog open={!!editTarget} onOpenChange={(v) => { if (!v) setEditTarget(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle>Edit Employee</DialogTitle></DialogHeader>
+          <form onSubmit={handleEdit} className="space-y-3 pt-1">
+            <div><Label>Full Name *</Label><Input required value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} autoFocus className="mt-1.5" placeholder="Full name" /></div>
+            <div><Label>Username *</Label><Input required value={editForm.username} onChange={(e) => setEditForm({ ...editForm, username: e.target.value })} className="mt-1.5" placeholder="Username" /></div>
+            <div><Label>Password *</Label><Input required value={editForm.password} onChange={(e) => setEditForm({ ...editForm, password: e.target.value })} className="mt-1.5" placeholder="Password" /></div>
+            <div>
+              <Label className="block mb-2">Sidebar Access *</Label>
+              <PermissionGrid value={editPerms} onChange={setEditPerms} />
+              {editPerms.length === 0 && <p className="text-xs text-red-500 mt-1.5">Select at least one section.</p>}
+            </div>
+            <div className="flex gap-2 pt-1">
+              <Button type="button" variant="outline" className="flex-1" onClick={() => setEditTarget(null)}>Cancel</Button>
+              <Button type="submit" className="flex-1" disabled={editSaving}>
+                {editSaving ? <span className="flex items-center gap-2"><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />Saving…</span> : "Save Changes"}
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm p-5">
@@ -217,7 +268,11 @@ function EmployeesPage() {
                       </button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="w-40">
-                      <DropdownMenuItem className="text-destructive focus:text-destructive gap-2 cursor-pointer" onClick={() => handleDelete(e.id, e.name, e.role)}>
+                      <DropdownMenuItem className="gap-2 cursor-pointer" onClick={() => openEdit(e)}>
+                        <Pencil className="w-3.5 h-3.5" />Edit
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem className="text-destructive focus:text-destructive gap-2 cursor-pointer" onClick={() => handleDelete(e.id, e.name)}>
                         <Trash2 className="w-3.5 h-3.5" />Remove
                       </DropdownMenuItem>
                     </DropdownMenuContent>
