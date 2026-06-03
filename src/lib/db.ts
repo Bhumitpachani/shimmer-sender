@@ -61,10 +61,12 @@ export interface Campaign {
   template_id: string;
   date_from: string | null;
   date_to: string | null;
+  batch_from: number | null;
+  batch_to: number | null;
   total_recipients: number;
   success_count: number;
   fail_count: number;
-  status: "pending" | "running" | "completed" | "failed";
+  status: "pending" | "running" | "completed" | "failed" | "paused";
   started_by: string;
   created_at: string;
 }
@@ -146,7 +148,7 @@ export const db = {
       const snap = await getDocs(collection(firestoreDb, "clients"));
       return snap.docs
         .map((d) => d.data() as Client)
-        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+        .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
     },
     async getById(id: string): Promise<Client | null> {
       const d = await getDoc(doc(firestoreDb, "clients", id));

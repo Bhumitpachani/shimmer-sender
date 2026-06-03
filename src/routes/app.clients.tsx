@@ -349,6 +349,7 @@ function ClientsPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-slate-100 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-800/50">
+                <th className="px-3 py-3 text-center text-xs font-semibold text-slate-400 uppercase tracking-wider w-10">#</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Client</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider hidden md:table-cell">Email</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider hidden sm:table-cell">Country</th>
@@ -373,8 +374,9 @@ function ClientsPage() {
                     <p className="text-xs text-slate-400">Try adjusting your search or filters</p>
                   </div>
                 </td></tr>
-              ) : filtered.map((c) => (
+              ) : filtered.map((c, idx) => (
                 <tr key={c.id} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/30 transition-colors">
+                  <td className="px-3 py-3 text-center text-xs font-mono text-slate-400 select-none">{clients.indexOf(c) + 1}</td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-3">
                       <div className={cn("w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white shrink-0", getAvatarColor(c.name))}>
