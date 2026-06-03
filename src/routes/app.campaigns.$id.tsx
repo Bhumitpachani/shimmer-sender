@@ -1,8 +1,14 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { db, type Campaign, type SendHistory, type Template, type Client } from "@/lib/db";
 import { getSession } from "@/lib/session";
-import { ArrowLeft, CheckCircle2, XCircle, Send, Users, TrendingUp, AlertCircle, User } from "lucide-react";
+import {
+  ArrowLeft, CheckCircle2, XCircle, Send, Users, TrendingUp,
+  AlertCircle, User, AlertTriangle, Play, RefreshCw,
+} from "lucide-react";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
 
 export const Route = createFileRoute("/app/campaigns/$id")({
   component: CampaignDetail,
@@ -15,6 +21,7 @@ function cn(...cls: (string | boolean | undefined | null)[]) {
 function CampaignDetail() {
   const { id } = Route.useParams();
   const session = getSession();
+  const navigate = useNavigate();
   const isAdmin = session?.role === "admin";
 
   const [campaign, setCampaign] = useState<Campaign | null>(null);
@@ -22,8 +29,10 @@ function CampaignDetail() {
   const [templates, setTemplates] = useState<Template[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
+  const [recovering, setRecovering] = useState(false);
 
-  useEffect(() => {
+  const load = () => {
+    setLoading(true);
     Promise.all([
       db.campaigns.getById(id),
       db.sendHistory.getByCampaignId(id),
@@ -35,7 +44,9 @@ function CampaignDetail() {
       setTemplates(tmpls);
       setClients(clnts);
     }).finally(() => setLoading(false));
-  }, [id]);
+  };
+
+  useEffect(() => { load(); }, [id]);
 
   if (loading) {
     return (
@@ -64,23 +75,54 @@ function CampaignDetail() {
 
   const tpl = templates.find((t) => t.id === campaign.template_id);
   const clientMap = Object.fromEntries(clients.map((c) => [c.id, c]));
-  const total = campaign.total_recipients || 1;
-  const successRate = Math.round((campaign.success_count / total) * 100);
 
   const history = isAdmin
     ? allHistory
     : allHistory.filter((h) => h.sent_by === session?.username);
 
-  const statusColors: Record<string, string> = {
-    completed: "bg-emerald-100 text-emerald-700 border-emerald-200",
-    running: "bg-amber-100 text-amber-700 border-amber-200",
-    failed: "bg-red-100 text-red-600 border-red-200",
-    pending: "bg-slate-100 text-slate-500 border-slate-200",
-  };
-
   const sentByList = isAdmin
     ? Array.from(new Set(allHistory.map((h) => h.sent_by))).filter(Boolean)
     : [];
+
+  const actualSuccess = allHistory.filter((h) => h.status === "success").length;
+  const actualFail = allHistory.filter((h) => h.status === "fail").length;
+  const actualDone = actualSuccess + actualFail;
+
+  const isInterrupted = campaign.status === "running";
+  const countsAreStale = isInterrupted && (campaign.success_count !== actualSuccess || campaign.fail_count !== actualFail || actualDone > 0);
+
+  const displaySuccess = countsAreStale ? actualSuccess : campaign.success_count;
+  const displayFail = countsAreStale ? actualFail : campaign.fail_count;
+  const total = campaign.total_recipients || 1;
+  const successRate = Math.round((displaySuccess / total) * 100);
+
+  const statusColors: Record<string, string> = {
+    completed: "bg-emerald-100 text-emerald-700 border-emerald-200",
+    running:   "bg-amber-100 text-amber-700 border-amber-200",
+    paused:    "bg-orange-100 text-orange-700 border-orange-200",
+    failed:    "bg-red-100 text-red-600 border-red-200",
+    pending:   "bg-slate-100 text-slate-500 border-slate-200",
+  };
+
+  const recoverAndResume = async () => {
+    setRecovering(true);
+    try {
+      await db.campaigns.update(id, {
+        status: "paused",
+        success_count: actualSuccess,
+        fail_count: actualFail,
+      });
+      toast.success(
+        `Recovered! ${actualSuccess} delivered, ${actualFail} failed, ${campaign.total_recipients - actualDone} remaining. Click ▶ Resume in the list.`,
+        { duration: 6000 }
+      );
+      navigate({ to: "/app/campaigns" });
+    } catch {
+      toast.error("Recovery failed — please try again");
+    } finally {
+      setRecovering(false);
+    }
+  };
 
   return (
     <div className="space-y-5">
@@ -89,6 +131,51 @@ function CampaignDetail() {
           <ArrowLeft className="w-4 h-4" /> Back to Campaigns
         </Link>
       </div>
+
+      {isInterrupted && (
+        <div className="rounded-2xl border-2 border-amber-300 bg-amber-50 p-5 flex flex-col sm:flex-row gap-4">
+          <div className="w-10 h-10 rounded-xl bg-amber-200 flex items-center justify-center shrink-0">
+            <AlertTriangle className="w-5 h-5 text-amber-700" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="font-semibold text-amber-900">Campaign was interrupted</div>
+            <p className="text-sm text-amber-800 mt-1 leading-relaxed">
+              The page was refreshed or closed while this campaign was sending. The send log below shows what was <em>actually</em> delivered. The counts below are recalculated from the log.
+            </p>
+            <div className="mt-3 flex flex-wrap items-center gap-4">
+              <div className="text-sm">
+                <span className="text-amber-700 font-medium">Send log shows: </span>
+                <span className="text-emerald-700 font-bold">{actualSuccess} delivered</span>
+                {" · "}
+                <span className="text-red-600 font-bold">{actualFail} failed</span>
+                {" · "}
+                <span className="text-amber-700 font-bold">{campaign.total_recipients - actualDone} remaining</span>
+              </div>
+              {actualDone > 0 && (
+                <div className="flex-1 min-w-[120px] max-w-[200px]">
+                  <Progress value={(actualDone / total) * 100} className="h-1.5" />
+                  <div className="text-[10px] text-amber-600 mt-0.5">{actualDone} / {campaign.total_recipients} sent so far</div>
+                </div>
+              )}
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                className="gap-2 bg-amber-600 hover:bg-amber-700"
+                onClick={recoverAndResume}
+                disabled={recovering}
+              >
+                {recovering
+                  ? <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Recovering…</>
+                  : <><Play className="w-3.5 h-3.5" /> Recover &amp; Resume</>}
+              </Button>
+              <Button size="sm" variant="outline" className="gap-2 border-amber-300 text-amber-700 hover:bg-amber-100" onClick={load} disabled={loading}>
+                <RefreshCw className={cn("w-3.5 h-3.5", loading && "animate-spin")} /> Refresh Counts
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-6">
         <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
@@ -107,7 +194,7 @@ function CampaignDetail() {
             </div>
           </div>
           <span className={cn("px-3 py-1 rounded-full text-xs font-semibold capitalize border self-start", statusColors[campaign.status] ?? statusColors.pending)}>
-            {campaign.status}
+            {isInterrupted ? "interrupted" : campaign.status}
           </span>
         </div>
 
@@ -115,7 +202,11 @@ function CampaignDetail() {
           <InfoField label="Template" value={tpl?.name ?? "—"} />
           <InfoField label="Subject" value={tpl?.subject ?? "—"} />
           <InfoField label="Country Filter" value={campaign.country ?? "All clients"} />
-          <InfoField label="Date Range" value={campaign.date_from ? `${campaign.date_from} → ${campaign.date_to ?? "…"}` : "No filter"} />
+          <InfoField label="Batch Range" value={
+            campaign.batch_from || campaign.batch_to
+              ? `Rows ${campaign.batch_from ?? 1} – ${campaign.batch_to ?? "end"}`
+              : "No batch filter"
+          } />
         </div>
 
         {isAdmin && sentByList.length > 1 && (
@@ -132,8 +223,8 @@ function CampaignDetail() {
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         <StatTile icon={Users} label="Recipients" value={campaign.total_recipients} color="bg-slate-50 text-slate-600" />
-        <StatTile icon={CheckCircle2} label="Delivered" value={campaign.success_count} color="bg-emerald-50 text-emerald-600" />
-        <StatTile icon={XCircle} label="Failed" value={campaign.fail_count} color="bg-red-50 text-red-500" />
+        <StatTile icon={CheckCircle2} label="Delivered" value={displaySuccess} color="bg-emerald-50 text-emerald-600" note={countsAreStale ? "from log" : undefined} />
+        <StatTile icon={XCircle} label="Failed" value={displayFail} color="bg-red-50 text-red-500" note={countsAreStale ? "from log" : undefined} />
         <StatTile icon={TrendingUp} label="Success Rate" value={`${successRate}%`} color="bg-blue-50 text-blue-600" raw />
       </div>
 
@@ -142,9 +233,9 @@ function CampaignDetail() {
           <h2 className="font-semibold text-slate-800 dark:text-white">Send Log</h2>
           <div className="flex items-center gap-2">
             {!isAdmin && allHistory.length !== history.length && (
-              <span className="text-xs text-slate-400">Showing your {history.length} of {allHistory.length} entries</span>
+              <span className="text-xs text-slate-400">Showing your {history.length} of {allHistory.length}</span>
             )}
-            <span className="text-xs text-slate-400 bg-slate-100 dark:bg-slate-800 px-2.5 py-1 rounded-full font-medium">{history.length} entries</span>
+            <span className="text-xs text-slate-400 bg-slate-100 dark:bg-slate-800 px-2.5 py-1 rounded-full font-medium">{allHistory.length} entries</span>
           </div>
         </div>
         <div className="overflow-x-auto">
@@ -226,14 +317,19 @@ function InfoField({ label, value }: { label: string; value: string }) {
   );
 }
 
-function StatTile({ icon: Icon, label, value, color, raw }: { icon: any; label: string; value: number | string; color: string; raw?: boolean }) {
+function StatTile({ icon: Icon, label, value, color, raw, note }: {
+  icon: any; label: string; value: number | string; color: string; raw?: boolean; note?: string;
+}) {
   return (
     <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm p-4">
       <div className={cn("w-9 h-9 rounded-lg flex items-center justify-center mb-3", color)}>
         <Icon className="w-4.5 h-4.5" />
       </div>
       <div className="text-2xl font-bold text-slate-900 dark:text-white">{raw ? value : Number(value).toLocaleString()}</div>
-      <div className="text-xs text-slate-400 mt-0.5">{label}</div>
+      <div className="text-xs text-slate-400 mt-0.5 flex items-center gap-1">
+        {label}
+        {note && <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-600 text-[9px] font-semibold uppercase">{note}</span>}
+      </div>
     </div>
   );
 }

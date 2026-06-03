@@ -171,11 +171,25 @@ function CampaignsPage() {
   };
 
   const openResume = async (campaign: Campaign) => {
-    const alreadySentIds = await db.sendHistory.getClientIdsByCampaignId(campaign.id);
+    const history = await db.sendHistory.getByCampaignId(campaign.id);
+    const actualSuccess = history.filter((h) => h.status === "success").length;
+    const actualFail = history.filter((h) => h.status === "fail").length;
+    const alreadySentIds = new Set(history.filter((h) => h.client_id).map((h) => h.client_id!));
     const remaining = campaign.total_recipients - alreadySentIds.size;
+
+    if (campaign.status === "running" || campaign.success_count !== actualSuccess || campaign.fail_count !== actualFail) {
+      await db.campaigns.update(campaign.id, {
+        status: "paused",
+        success_count: actualSuccess,
+        fail_count: actualFail,
+      });
+      campaign = { ...campaign, status: "paused", success_count: actualSuccess, fail_count: actualFail };
+    }
+
     setResumeTarget(campaign);
     setResumeRemaining(remaining);
     setResumeOpen(true);
+    await load();
   };
 
   const resumeCampaign = async () => {
@@ -442,11 +456,16 @@ function CampaignsPage() {
                     <td className="px-4 py-3 hidden lg:table-cell text-slate-400 text-xs">{new Date(c.created_at).toLocaleString()}</td>
                     <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
                       <div className="flex items-center justify-end gap-1">
-                        {c.status === "paused" && (
+                        {(c.status === "paused" || c.status === "running") && (
                           <button
                             onClick={() => openResume(c)}
-                            className="p-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 transition-colors text-amber-600"
-                            title="Resume campaign"
+                            className={cn(
+                              "p-1.5 rounded-lg transition-colors",
+                              c.status === "running"
+                                ? "bg-red-50 hover:bg-red-100 text-red-500"
+                                : "bg-amber-50 hover:bg-amber-100 text-amber-600"
+                            )}
+                            title={c.status === "running" ? "Interrupted — click to recover & resume" : "Resume campaign"}
                           >
                             <Play className="w-4 h-4" />
                           </button>
