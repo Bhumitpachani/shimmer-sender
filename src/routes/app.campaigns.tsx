@@ -62,6 +62,22 @@ function CampaignsPage() {
         db.clients.getAll(),
         db.templates.getAll(),
       ]);
+
+      const interrupted = allCampaigns.filter((c) => c.status === "running");
+      if (interrupted.length > 0) {
+        await Promise.all(
+          interrupted.map(async (c) => {
+            const hist = await db.sendHistory.getByCampaignId(c.id);
+            const s = hist.filter((h) => h.status === "success").length;
+            const f = hist.filter((h) => h.status === "fail").length;
+            await db.campaigns.update(c.id, { status: "paused", success_count: s, fail_count: f });
+            c.status = "paused";
+            c.success_count = s;
+            c.fail_count = f;
+          })
+        );
+      }
+
       setCampaigns(isEmployee ? allCampaigns.filter((c) => c.started_by === session?.username) : allCampaigns);
       setClients(allClients);
       setTemplates(allTemplates);
