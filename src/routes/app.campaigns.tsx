@@ -44,6 +44,7 @@ function CampaignsPage() {
   const [useBatch, setUseBatch] = useState(false);
   const [batchFrom, setBatchFrom] = useState("");
   const [batchTo, setBatchTo] = useState("");
+  const [delaySeconds, setDelaySeconds] = useState(3);
 
   const [sending, setSending] = useState(false);
   const [progress, setProgress] = useState<Progress>({ done: 0, total: 0, success: 0, fail: 0 });
@@ -115,7 +116,10 @@ function CampaignsPage() {
     setUseDate(false); setDateFrom(""); setDateTo("");
     setUseRepeat(false); setRepeatCampaignId(""); setRepeatIds(new Set());
     setUseBatch(false); setBatchFrom(""); setBatchTo("");
+    setDelaySeconds(3);
   };
+
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
   const runSendLoop = async (
     cid: string,
@@ -124,6 +128,7 @@ function CampaignsPage() {
     initSuccess: number,
     initFail: number,
     totalRecipients: number,
+    delaySec: number,
     onDone: () => void,
   ) => {
     let success = initSuccess, fail = initFail;
@@ -147,6 +152,7 @@ function CampaignsPage() {
       });
       await db.campaigns.update(cid, { success_count: success, fail_count: fail });
       setProgress({ done: success + fail, total: totalRecipients, success, fail });
+      if (i < sendTargets.length - 1 && delaySec > 0) await sleep(delaySec * 1000);
     }
     await db.campaigns.update(cid, {
       success_count: success, fail_count: fail,
@@ -180,7 +186,7 @@ function CampaignsPage() {
       status: "running", started_by: session?.username ?? "admin",
     });
 
-    await runSendLoop(cid, targets, tpl, 0, 0, targets.length, () => {
+    await runSendLoop(cid, targets, tpl, 0, 0, targets.length, delaySeconds, () => {
       setOpen(false);
       reset();
     });
@@ -242,7 +248,7 @@ function CampaignsPage() {
     setProgress({ done: campaign.success_count + campaign.fail_count, total: campaign.total_recipients, success: campaign.success_count, fail: campaign.fail_count });
     await db.campaigns.update(campaign.id, { status: "running" });
 
-    await runSendLoop(campaign.id, remaining, tpl, campaign.success_count, campaign.fail_count, campaign.total_recipients, () => {
+    await runSendLoop(campaign.id, remaining, tpl, campaign.success_count, campaign.fail_count, campaign.total_recipients, delaySeconds, () => {
       setResumeTarget(null);
     });
   };
@@ -327,6 +333,44 @@ function CampaignsPage() {
                       </p>
                     </div>
                   </FilterBlock>
+                </div>
+
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3.5">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium text-slate-700">Delay between emails</div>
+                      <div className="text-xs text-slate-400 mt-0.5 leading-snug">
+                        Slows sending to avoid spam filters. 2–5 s recommended for large lists.
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {[0, 1, 2, 3, 5, 10].map((s) => (
+                        <button
+                          key={s}
+                          type="button"
+                          onClick={() => setDelaySeconds(s)}
+                          className={cn(
+                            "px-2.5 py-1 rounded-lg text-xs font-semibold border transition-colors",
+                            delaySeconds === s
+                              ? "bg-primary text-white border-primary"
+                              : "bg-white text-slate-600 border-slate-200 hover:border-primary hover:text-primary"
+                          )}
+                        >
+                          {s === 0 ? "None" : `${s}s`}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  {delaySeconds > 0 && targets.length > 0 && (
+                    <div className="mt-2.5 pt-2.5 border-t border-slate-200 text-xs text-slate-500 flex items-center gap-1.5">
+                      <span>⏱</span>
+                      <span>
+                        Estimated time: <strong className="text-slate-700">
+                          {formatDuration(targets.length * delaySeconds)}
+                        </strong> for {targets.length} emails at {delaySeconds}s each
+                      </span>
+                    </div>
+                  )}
                 </div>
 
                 <div className={cn("rounded-xl border-2 p-4 text-sm text-center font-medium transition-colors",
@@ -548,6 +592,16 @@ function CampaignsPage() {
       </Dialog>
     </div>
   );
+}
+
+function formatDuration(totalSeconds: number): string {
+  if (totalSeconds < 60) return `~${totalSeconds}s`;
+  const m = Math.floor(totalSeconds / 60);
+  const s = totalSeconds % 60;
+  if (m < 60) return s > 0 ? `~${m}m ${s}s` : `~${m}m`;
+  const h = Math.floor(m / 60);
+  const rm = m % 60;
+  return rm > 0 ? `~${h}h ${rm}m` : `~${h}h`;
 }
 
 function FilterBlock({ icon: Icon, label, active, onToggle, children }: { icon: any; label: string; active: boolean; onToggle: (v: boolean) => void; children?: React.ReactNode }) {
