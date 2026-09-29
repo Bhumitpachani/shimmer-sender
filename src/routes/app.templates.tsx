@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { db, type Template } from "@/lib/db";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -37,6 +37,42 @@ const SAMPLE = `<div style="font-family: -apple-system, Arial, sans-serif; max-w
     <p style="color: #94a3b8; font-size: 12px; margin: 0;">© 2025 Starlink Jewels · Unsubscribe</p>
   </div>
 </div>`;
+
+const THUMB_HEIGHT = 160;
+
+function TemplateThumbnail({ html, name }: { html: string; name: string }) {
+  const [scale, setScale] = useState(0.3333);
+  const [contentHeight, setContentHeight] = useState(THUMB_HEIGHT / 0.3333);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+
+  const measure = () => {
+    // allow-same-origin is required for contentDocument to be readable at all;
+    // allow-scripts is deliberately omitted so template HTML stays inert.
+    const doc = iframeRef.current?.contentDocument;
+    const height = doc?.documentElement?.scrollHeight || doc?.body?.scrollHeight;
+    if (height && height > 0) {
+      setContentHeight(height);
+      setScale(Math.min(1.5, THUMB_HEIGHT / height));
+    }
+  };
+
+  return (
+    <div className="mx-4 mb-3 rounded-xl overflow-hidden border border-slate-100 bg-white" style={{ height: THUMB_HEIGHT }}>
+      <div style={{ width: `${100 / scale}%`, height: contentHeight, transform: `scale(${scale})`, transformOrigin: "top left" }}>
+        <iframe
+          ref={iframeRef}
+          srcDoc={html}
+          scrolling="no"
+          sandbox="allow-same-origin"
+          title={name}
+          onLoad={measure}
+          className="w-full border-0"
+          style={{ height: contentHeight, pointerEvents: "none" }}
+        />
+      </div>
+    </div>
+  );
+}
 
 function TemplatesPage() {
   const session = getSession();
@@ -137,18 +173,8 @@ function TemplatesPage() {
                   </div>
                 </div>
               </div>
-              <div className="mx-4 mb-3 rounded-xl overflow-hidden border border-slate-100 bg-white" style={{ height: 160 }}>
-                <div style={{ width: "300%", height: 480, transform: "scale(0.3333)", transformOrigin: "top left" }}>
-                  <iframe
-                    srcDoc={t.html}
-                    scrolling="no"
-                    sandbox=""
-                    title={t.name}
-                    className="w-full h-full border-0"
-                    style={{ pointerEvents: "none" }}
-                  />
-                </div>
-              </div>
+              <TemplateThumbnail html={t.html} name={t.name} />
+
               <div className="px-4 pb-4 mt-auto flex items-center justify-between gap-2">
                 <div className="text-[11px] text-slate-400">by {t.created_by} · {new Date(t.created_at).toLocaleDateString()}</div>
                 <div className="flex gap-1.5">

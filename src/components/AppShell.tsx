@@ -117,7 +117,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     exact ? location.pathname === to || location.pathname === "/app/" : location.pathname === to || location.pathname.startsWith(to + "/");
 
   const SidebarInner = ({ compact }: { compact: boolean }) => (
-    <div className={cn("h-full flex flex-col bg-[#0f172a] text-white transition-all duration-200", compact ? "w-[68px]" : "w-64")}>
+    <div className={cn("h-full flex flex-col bg-gradient-to-b from-[#0f172a] via-[#0f172a] to-[#0a0f1e] text-white transition-all duration-200", compact ? "w-[68px]" : "w-64")}>
       <div className={cn("h-16 flex items-center shrink-0 border-b border-white/[0.06]", compact ? "justify-center" : "px-5 gap-3")}>
         <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-primary to-[oklch(0.55_0.22_280)] flex items-center justify-center shadow-lg shadow-primary/30 shrink-0">
           <Sparkles className="w-5 h-5 text-white" />
@@ -147,10 +147,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                       className={cn(
                         "flex items-center rounded-lg text-sm font-medium transition-all relative",
                         compact ? "justify-center py-3 mx-0" : "gap-3 px-3 py-2.5",
-                        active ? "bg-primary/90 text-white shadow-sm" : "text-slate-400 hover:text-white hover:bg-white/[0.05]"
+                        active
+                          ? "bg-gradient-to-r from-primary to-[oklch(0.55_0.22_280)] text-white shadow-md shadow-primary/40"
+                          : "text-slate-400 hover:text-white hover:bg-white/[0.06]"
                       )}
                     >
-                      {active && !compact && <span className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 rounded-r-full bg-white/60" />}
+                      {active && !compact && <span className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 rounded-r-full bg-white/70" />}
                       <Icon className="w-[18px] h-[18px] shrink-0" />
                       {!compact && item.label}
                     </Link>
