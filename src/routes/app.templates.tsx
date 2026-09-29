@@ -138,7 +138,16 @@ function TemplatesPage() {
                 </div>
               </div>
               <div className="mx-4 mb-3 rounded-xl overflow-hidden border border-slate-100 bg-white" style={{ height: 160 }}>
-                <iframe srcDoc={t.html} className="w-full h-full" sandbox="" title={t.name} style={{ pointerEvents: "none" }} />
+                <div style={{ width: "300%", height: 480, transform: "scale(0.3333)", transformOrigin: "top left" }}>
+                  <iframe
+                    srcDoc={t.html}
+                    scrolling="no"
+                    sandbox=""
+                    title={t.name}
+                    className="w-full h-full border-0"
+                    style={{ pointerEvents: "none" }}
+                  />
+                </div>
               </div>
               <div className="px-4 pb-4 mt-auto flex items-center justify-between gap-2">
                 <div className="text-[11px] text-slate-400">by {t.created_by} · {new Date(t.created_at).toLocaleDateString()}</div>

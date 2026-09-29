@@ -15,7 +15,7 @@ import { getSession } from "@/lib/session";
 import { sendMail } from "@/lib/mailApi";
 import { cn } from "@/lib/utils";
 
-export const Route = createFileRoute("/app/campaigns/new")({
+export const Route = createFileRoute("/app/campaigns_/new")({
   component: NewCampaignWizard,
 });
 

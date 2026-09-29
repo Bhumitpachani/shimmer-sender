@@ -10,7 +10,7 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { getAvatarColor } from "@/lib/avatar";
 
-export const Route = createFileRoute("/app/clients/$id")({
+export const Route = createFileRoute("/app/clients_/$id")({
   component: ClientDetail,
 });
 

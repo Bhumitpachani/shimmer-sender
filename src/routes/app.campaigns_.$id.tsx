@@ -14,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { StatCard } from "@/components/StatCard";
 import { cn } from "@/lib/utils";
 
-export const Route = createFileRoute("/app/campaigns/$id")({
+export const Route = createFileRoute("/app/campaigns_/$id")({
   component: CampaignDetail,
 });
 
