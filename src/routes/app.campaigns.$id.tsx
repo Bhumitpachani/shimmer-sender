@@ -4,19 +4,19 @@ import { db, type Campaign, type SendHistory, type Template, type Client } from 
 import { getSession } from "@/lib/session";
 import {
   ArrowLeft, CheckCircle2, XCircle, Send, Users, TrendingUp,
-  AlertCircle, User, AlertTriangle, Play, RefreshCw,
+  AlertCircle, User, AlertTriangle, Play, RefreshCw, Search, X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { StatCard } from "@/components/StatCard";
+import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/app/campaigns/$id")({
   component: CampaignDetail,
 });
-
-function cn(...cls: (string | boolean | undefined | null)[]) {
-  return cls.filter(Boolean).join(" ");
-}
 
 function CampaignDetail() {
   const { id } = Route.useParams();
@@ -30,6 +30,8 @@ function CampaignDetail() {
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
   const [recovering, setRecovering] = useState(false);
+  const [logSearch, setLogSearch] = useState("");
+  const [logStatus, setLogStatus] = useState<"all" | "success" | "fail">("all");
 
   const load = () => {
     setLoading(true);
@@ -79,6 +81,16 @@ function CampaignDetail() {
   const history = isAdmin
     ? allHistory
     : allHistory.filter((h) => h.sent_by === session?.username);
+
+  const filteredHistory = history.filter((h) => {
+    if (logStatus !== "all" && h.status !== logStatus) return false;
+    if (logSearch) {
+      const s = logSearch.toLowerCase();
+      const client = h.client_id ? clientMap[h.client_id] : null;
+      return [h.client_email, client?.name ?? "", h.sent_by].some((v) => v.toLowerCase().includes(s));
+    }
+    return true;
+  });
 
   const sentByList = isAdmin
     ? Array.from(new Set(allHistory.map((h) => h.sent_by))).filter(Boolean)
@@ -222,22 +234,43 @@ function CampaignDetail() {
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <StatTile icon={Users} label="Recipients" value={campaign.total_recipients} color="bg-slate-50 text-slate-600" />
-        <StatTile icon={CheckCircle2} label="Delivered" value={displaySuccess} color="bg-emerald-50 text-emerald-600" note={countsAreStale ? "from log" : undefined} />
-        <StatTile icon={XCircle} label="Failed" value={displayFail} color="bg-red-50 text-red-500" note={countsAreStale ? "from log" : undefined} />
-        <StatTile icon={TrendingUp} label="Success Rate" value={`${successRate}%`} color="bg-blue-50 text-blue-600" raw />
+        <StatCard icon={Users} label="Recipients" value={campaign.total_recipients} tone="slate" raw />
+        <StatCard icon={CheckCircle2} label="Delivered" value={displaySuccess} tone="emerald" note={countsAreStale ? "from log" : undefined} raw />
+        <StatCard icon={XCircle} label="Failed" value={displayFail} tone="red" note={countsAreStale ? "from log" : undefined} raw />
+        <StatCard icon={TrendingUp} label="Success Rate" value={`${successRate}%`} tone="blue" raw />
       </div>
 
       <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
-        <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
+        <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <h2 className="font-semibold text-slate-800 dark:text-white">Send Log</h2>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             {!isAdmin && allHistory.length !== history.length && (
               <span className="text-xs text-slate-400">Showing your {history.length} of {allHistory.length}</span>
             )}
             <span className="text-xs text-slate-400 bg-slate-100 dark:bg-slate-800 px-2.5 py-1 rounded-full font-medium">{allHistory.length} entries</span>
           </div>
         </div>
+        {history.length > 0 && (
+          <div className="px-5 py-3 border-b border-slate-100 dark:border-slate-800 flex flex-col sm:flex-row gap-2">
+            <div className="relative flex-1">
+              <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <Input placeholder="Search client or email…" className="pl-8 h-8 text-sm bg-slate-50 border-slate-200" value={logSearch} onChange={(e) => setLogSearch(e.target.value)} />
+              {logSearch && (
+                <button onClick={() => setLogSearch("")} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+            <Select value={logStatus} onValueChange={(v) => setLogStatus(v as typeof logStatus)}>
+              <SelectTrigger className="h-8 text-sm bg-slate-50 sm:w-40 shrink-0"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All statuses</SelectItem>
+                <SelectItem value="success">Delivered</SelectItem>
+                <SelectItem value="fail">Failed</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        )}
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
@@ -263,7 +296,19 @@ function CampaignDetail() {
                     </div>
                   </td>
                 </tr>
-              ) : history.map((h) => {
+              ) : filteredHistory.length === 0 ? (
+                <tr>
+                  <td colSpan={isAdmin ? 6 : 5} className="px-4 py-14 text-center">
+                    <div className="flex flex-col items-center gap-2">
+                      <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center">
+                        <Search className="w-4 h-4 text-slate-400" />
+                      </div>
+                      <p className="text-sm font-medium text-slate-600">No matching entries</p>
+                      <p className="text-xs text-slate-400">Try a different search or status filter</p>
+                    </div>
+                  </td>
+                </tr>
+              ) : filteredHistory.map((h) => {
                 const client = h.client_id ? clientMap[h.client_id] : null;
                 return (
                   <tr key={h.id} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/30 transition-colors">
@@ -313,23 +358,6 @@ function InfoField({ label, value }: { label: string; value: string }) {
     <div>
       <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">{label}</div>
       <div className="text-sm font-medium text-slate-800 dark:text-white">{value}</div>
-    </div>
-  );
-}
-
-function StatTile({ icon: Icon, label, value, color, raw, note }: {
-  icon: any; label: string; value: number | string; color: string; raw?: boolean; note?: string;
-}) {
-  return (
-    <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm p-4">
-      <div className={cn("w-9 h-9 rounded-lg flex items-center justify-center mb-3", color)}>
-        <Icon className="w-4.5 h-4.5" />
-      </div>
-      <div className="text-2xl font-bold text-slate-900 dark:text-white">{raw ? value : Number(value).toLocaleString()}</div>
-      <div className="text-xs text-slate-400 mt-0.5 flex items-center gap-1">
-        {label}
-        {note && <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-600 text-[9px] font-semibold uppercase">{note}</span>}
-      </div>
     </div>
   );
 }

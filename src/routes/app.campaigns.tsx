@@ -1,24 +1,25 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { db, type Campaign, type Client, type Template } from "@/lib/db";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Progress } from "@/components/ui/progress";
-import { Send, Plus, Globe, Calendar, Repeat2, Eye, RefreshCw, Play, Pause, Hash } from "lucide-react";
+import { Send, Plus, Globe, Eye, RefreshCw, Play, Pause, Search, X } from "lucide-react";
 import { toast } from "sonner";
 import { getSession } from "@/lib/session";
 import { sendMail } from "@/lib/mailApi";
+import { cn } from "@/lib/utils";
+import { PageHeader } from "@/components/PageHeader";
 
 export const Route = createFileRoute("/app/campaigns")({
   component: CampaignsPage,
 });
 
-function cn(...cls: (string | boolean | undefined | null)[]) { return cls.filter(Boolean).join(" "); }
+interface SendProgress { done: number; total: number; success: number; fail: number; }
 
-interface Progress { done: number; total: number; success: number; fail: number; }
+const STATUS_OPTIONS = ["all", "pending", "running", "paused", "completed", "failed"] as const;
 
 function CampaignsPage() {
   const session = getSession();
@@ -29,25 +30,11 @@ function CampaignsPage() {
   const [clients, setClients] = useState<Client[]>([]);
   const [templates, setTemplates] = useState<Template[]>([]);
   const [loading, setLoading] = useState(true);
-  const [open, setOpen] = useState(false);
-
-  const [name, setName] = useState("");
-  const [templateId, setTemplateId] = useState("");
-  const [useCountry, setUseCountry] = useState(false);
-  const [country, setCountry] = useState("");
-  const [useDate, setUseDate] = useState(false);
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
-  const [useRepeat, setUseRepeat] = useState(false);
-  const [repeatCampaignId, setRepeatCampaignId] = useState("");
-  const [repeatIds, setRepeatIds] = useState<Set<string>>(new Set());
-  const [useBatch, setUseBatch] = useState(false);
-  const [batchFrom, setBatchFrom] = useState("");
-  const [batchTo, setBatchTo] = useState("");
-  const [delaySeconds, setDelaySeconds] = useState(3);
+  const [search, setSearch] = useState("");
+  const [status, setStatus] = useState<(typeof STATUS_OPTIONS)[number]>("all");
 
   const [sending, setSending] = useState(false);
-  const [progress, setProgress] = useState<Progress>({ done: 0, total: 0, success: 0, fail: 0 });
+  const [progress, setProgress] = useState<SendProgress>({ done: 0, total: 0, success: 0, fail: 0 });
   const [isPausing, setIsPausing] = useState(false);
   const pauseRef = useRef(false);
 
@@ -89,108 +76,19 @@ function CampaignsPage() {
 
   useEffect(() => { load(); }, []);
 
-  useEffect(() => {
-    if (!useRepeat || !repeatCampaignId) { setRepeatIds(new Set()); return; }
-    db.sendHistory.getClientIdsByCampaignId(repeatCampaignId).then(setRepeatIds);
-  }, [useRepeat, repeatCampaignId]);
-
-  const countries = useMemo(() => Array.from(new Set(clients.map((c) => c.country))).filter(Boolean).sort(), [clients]);
-
-  const filteredBase = useMemo(() => clients.filter((c) => {
-    if (useCountry && country && c.country !== country) return false;
-    if (useDate && dateFrom && new Date(c.created_at) < new Date(dateFrom)) return false;
-    if (useDate && dateTo && new Date(c.created_at) > new Date(dateTo + "T23:59:59")) return false;
-    if (useRepeat && repeatCampaignId && repeatIds.size > 0 && !repeatIds.has(c.id)) return false;
+  const filtered = useMemo(() => campaigns.filter((c) => {
+    if (status !== "all" && c.status !== status) return false;
+    if (search) {
+      const s = search.toLowerCase();
+      const tpl = templates.find((t) => t.id === c.template_id);
+      return [c.name, tpl?.name ?? "", c.started_by, c.country ?? ""].some((v) => v.toLowerCase().includes(s));
+    }
     return true;
-  }), [clients, useCountry, country, useDate, dateFrom, dateTo, useRepeat, repeatCampaignId, repeatIds]);
+  }), [campaigns, search, status, templates]);
 
-  const targets = useMemo(() => {
-    if (!useBatch) return filteredBase;
-    const from = Math.max(1, parseInt(batchFrom) || 1);
-    const to = parseInt(batchTo) || filteredBase.length;
-    return filteredBase.slice(from - 1, to);
-  }, [filteredBase, useBatch, batchFrom, batchTo]);
-
-  const reset = () => {
-    setName(""); setTemplateId(""); setUseCountry(false); setCountry("");
-    setUseDate(false); setDateFrom(""); setDateTo("");
-    setUseRepeat(false); setRepeatCampaignId(""); setRepeatIds(new Set());
-    setUseBatch(false); setBatchFrom(""); setBatchTo("");
-    setDelaySeconds(3);
-  };
+  const hasFilters = search !== "" || status !== "all";
 
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-  const runSendLoop = async (
-    cid: string,
-    sendTargets: Client[],
-    tpl: Template,
-    initSuccess: number,
-    initFail: number,
-    totalRecipients: number,
-    delaySec: number,
-    onDone: () => void,
-  ) => {
-    let success = initSuccess, fail = initFail;
-    for (let i = 0; i < sendTargets.length; i++) {
-      if (pauseRef.current) {
-        await db.campaigns.update(cid, { status: "paused", success_count: success, fail_count: fail });
-        setSending(false); setIsPausing(false); pauseRef.current = false;
-        toast.info(`Campaign paused — ${success + fail} of ${totalRecipients} done`);
-        onDone();
-        await load();
-        return;
-      }
-      const c = sendTargets[i];
-      const res = await sendMail({ to: c.email, subject: tpl.subject, html: tpl.html });
-      if (res.ok) success++; else fail++;
-      await db.sendHistory.insert({
-        campaign_id: cid, client_id: c.id, client_email: c.email,
-        template_id: tpl.id, template_name: tpl.name,
-        status: res.ok ? "success" : "fail", error: res.error ?? null,
-        sent_by: session?.username ?? "admin",
-      });
-      await db.campaigns.update(cid, { success_count: success, fail_count: fail });
-      setProgress({ done: success + fail, total: totalRecipients, success, fail });
-      if (i < sendTargets.length - 1 && delaySec > 0) await sleep(delaySec * 1000);
-    }
-    await db.campaigns.update(cid, {
-      success_count: success, fail_count: fail,
-      status: fail === totalRecipients ? "failed" : "completed",
-    });
-    setSending(false);
-    toast.success(`Done! ${success} sent · ${fail} failed`);
-    onDone();
-    await load();
-  };
-
-  const startCampaign = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const tpl = templates.find((t) => t.id === templateId);
-    if (!tpl) return toast.error("Pick a template");
-    if (targets.length === 0) return toast.error("No clients match your filters");
-    if (!confirm(`Send "${tpl.name}" to ${targets.length} client(s)?`)) return;
-
-    setSending(true);
-    pauseRef.current = false;
-    setProgress({ done: 0, total: targets.length, success: 0, fail: 0 });
-
-    const { id: cid } = await db.campaigns.insert({
-      name, country: useCountry && country ? country : null,
-      template_id: tpl.id,
-      date_from: useDate && dateFrom ? dateFrom : null,
-      date_to: useDate && dateTo ? dateTo : null,
-      batch_from: useBatch && batchFrom ? parseInt(batchFrom) : null,
-      batch_to: useBatch && batchTo ? parseInt(batchTo) : null,
-      total_recipients: targets.length, success_count: 0, fail_count: 0,
-      status: "running", started_by: session?.username ?? "admin",
-    });
-
-    await runSendLoop(cid, targets, tpl, 0, 0, targets.length, delaySeconds, () => {
-      setOpen(false);
-      reset();
-    });
-  };
 
   const openResume = async (campaign: Campaign) => {
     const history = await db.sendHistory.getByCampaignId(campaign.id);
@@ -248,172 +146,61 @@ function CampaignsPage() {
     setProgress({ done: campaign.success_count + campaign.fail_count, total: campaign.total_recipients, success: campaign.success_count, fail: campaign.fail_count });
     await db.campaigns.update(campaign.id, { status: "running" });
 
-    await runSendLoop(campaign.id, remaining, tpl, campaign.success_count, campaign.fail_count, campaign.total_recipients, delaySeconds, () => {
-      setResumeTarget(null);
-    });
+    let success = campaign.success_count, fail = campaign.fail_count;
+    let paused = false;
+    for (let i = 0; i < remaining.length; i++) {
+      if (pauseRef.current) {
+        paused = true;
+        await db.campaigns.update(campaign.id, { status: "paused", success_count: success, fail_count: fail });
+        toast.info(`Campaign paused — ${success + fail} of ${campaign.total_recipients} done`);
+        break;
+      }
+      const c = remaining[i];
+      const res = await sendMail({ to: c.email, subject: tpl.subject, html: tpl.html });
+      if (res.ok) success++; else fail++;
+      await db.sendHistory.insert({
+        campaign_id: campaign.id, client_id: c.id, client_email: c.email,
+        template_id: tpl.id, template_name: tpl.name,
+        status: res.ok ? "success" : "fail", error: res.error ?? null,
+        sent_by: session?.username ?? "admin",
+      });
+      await db.campaigns.update(campaign.id, { success_count: success, fail_count: fail });
+      setProgress({ done: success + fail, total: campaign.total_recipients, success, fail });
+      if (i < remaining.length - 1) await sleep(1500);
+    }
+    if (!paused) {
+      await db.campaigns.update(campaign.id, {
+        success_count: success, fail_count: fail,
+        status: fail === campaign.total_recipients ? "failed" : "completed",
+      });
+      toast.success(`Done! ${success} sent · ${fail} failed`);
+    }
+    setSending(false);
+    setIsPausing(false);
+    pauseRef.current = false;
+    setResumeTarget(null);
+    await load();
   };
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div>
-          <div className="flex items-center gap-2.5">
-            <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Campaigns</h1>
-            <span className="px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-600 text-xs font-semibold">{campaigns.length}</span>
-          </div>
-          <p className="text-sm text-slate-500 mt-0.5">
-            {isEmployee ? "Your launched campaigns" : "Send email blasts and track delivery results"}
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" className="gap-1.5" onClick={() => load()} disabled={loading}>
-            <RefreshCw className={cn("w-4 h-4", loading && "animate-spin")} />Refresh
-          </Button>
-          <Dialog open={open} onOpenChange={(v) => { if (!sending) { setOpen(v); if (!v) reset(); } }}>
-            <DialogTrigger asChild>
+      <PageHeader
+        title="Campaigns"
+        count={campaigns.length}
+        subtitle={isEmployee ? "Your launched campaigns" : "Send email blasts and track delivery results"}
+        actions={
+          <>
+            <Button variant="outline" size="sm" className="gap-1.5" onClick={() => load()} disabled={loading}>
+              <RefreshCw className={cn("w-4 h-4", loading && "animate-spin")} />Refresh
+            </Button>
+            <Link to="/app/campaigns/new">
               <Button className="gap-1.5 shadow-sm shadow-primary/20" disabled={templates.length === 0 || clients.length === 0}>
                 <Plus className="w-4 h-4" />New Campaign
               </Button>
-            </DialogTrigger>
-            <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
-              <DialogHeader><DialogTitle>Launch New Campaign</DialogTitle></DialogHeader>
-              <form onSubmit={startCampaign} className="space-y-4 pt-1">
-                <div>
-                  <Label>Campaign Name *</Label>
-                  <Input required value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Diwali Sale — USA Batch 1" className="mt-1" />
-                </div>
-                <div>
-                  <Label>Email Template *</Label>
-                  <Select value={templateId} onValueChange={setTemplateId} required>
-                    <SelectTrigger className="mt-1"><SelectValue placeholder="Choose a template" /></SelectTrigger>
-                    <SelectContent>
-                      {templates.map((t) => <SelectItem key={t.id} value={t.id}><div className="font-medium">{t.name}</div></SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <Label className="text-slate-500 text-xs uppercase tracking-wider">Optional Filters</Label>
-                  <FilterBlock icon={Globe} label="Filter by Country" active={useCountry} onToggle={(v) => { setUseCountry(v); if (!v) setCountry(""); }}>
-                    <Select value={country} onValueChange={setCountry}>
-                      <SelectTrigger className="h-8 text-sm mt-2"><SelectValue placeholder="Select country" /></SelectTrigger>
-                      <SelectContent>{countries.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
-                    </Select>
-                  </FilterBlock>
-                  <FilterBlock icon={Calendar} label="Filter by Date Added" active={useDate} onToggle={(v) => { setUseDate(v); if (!v) { setDateFrom(""); setDateTo(""); } }}>
-                    <div className="grid grid-cols-2 gap-2 mt-2">
-                      <div><Label className="text-xs text-slate-500">From</Label><Input type="date" className="h-8 text-sm mt-0.5" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} /></div>
-                      <div><Label className="text-xs text-slate-500">To</Label><Input type="date" className="h-8 text-sm mt-0.5" value={dateTo} onChange={(e) => setDateTo(e.target.value)} /></div>
-                    </div>
-                  </FilterBlock>
-                  <FilterBlock icon={Repeat2} label="Repeat from Previous Campaign" active={useRepeat} onToggle={(v) => { setUseRepeat(v); if (!v) setRepeatCampaignId(""); }}>
-                    <Select value={repeatCampaignId} onValueChange={setRepeatCampaignId}>
-                      <SelectTrigger className="h-8 text-sm mt-2"><SelectValue placeholder="Select previous campaign" /></SelectTrigger>
-                      <SelectContent>{campaigns.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
-                    </Select>
-                  </FilterBlock>
-                  <FilterBlock icon={Hash} label="Send Batch by Row Range" active={useBatch} onToggle={(v) => { setUseBatch(v); if (!v) { setBatchFrom(""); setBatchTo(""); } }}>
-                    <div className="mt-2 space-y-1.5">
-                      <p className="text-[11px] text-slate-500 leading-snug">
-                        Splits the filtered client list into a batch. Row numbers match the <strong>Clients</strong> page (oldest at top, newest at bottom).
-                        Example: send rows 1–300 now, rows 301–900 next week.
-                      </p>
-                      <div className="grid grid-cols-2 gap-2">
-                        <div>
-                          <Label className="text-xs text-slate-500">From row #</Label>
-                          <Input type="number" min={1} className="h-8 text-sm mt-0.5" placeholder={`1`} value={batchFrom} onChange={(e) => setBatchFrom(e.target.value)} />
-                        </div>
-                        <div>
-                          <Label className="text-xs text-slate-500">To row #</Label>
-                          <Input type="number" min={1} className="h-8 text-sm mt-0.5" placeholder={`${filteredBase.length}`} value={batchTo} onChange={(e) => setBatchTo(e.target.value)} />
-                        </div>
-                      </div>
-                      <p className="text-[11px] text-slate-400">
-                        Filtered list has <strong>{filteredBase.length}</strong> clients. Leave blank to use full range.
-                      </p>
-                    </div>
-                  </FilterBlock>
-                </div>
-
-                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3.5">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="text-sm font-medium text-slate-700">Delay between emails</div>
-                      <div className="text-xs text-slate-400 mt-0.5 leading-snug">
-                        Slows sending to avoid spam filters. 2–5 s recommended for large lists.
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      {[0, 1, 2, 3, 5, 10].map((s) => (
-                        <button
-                          key={s}
-                          type="button"
-                          onClick={() => setDelaySeconds(s)}
-                          className={cn(
-                            "px-2.5 py-1 rounded-lg text-xs font-semibold border transition-colors",
-                            delaySeconds === s
-                              ? "bg-primary text-white border-primary"
-                              : "bg-white text-slate-600 border-slate-200 hover:border-primary hover:text-primary"
-                          )}
-                        >
-                          {s === 0 ? "None" : `${s}s`}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  {delaySeconds > 0 && targets.length > 0 && (
-                    <div className="mt-2.5 pt-2.5 border-t border-slate-200 text-xs text-slate-500 flex items-center gap-1.5">
-                      <span>⏱</span>
-                      <span>
-                        Estimated time: <strong className="text-slate-700">
-                          {formatDuration(targets.length * delaySeconds)}
-                        </strong> for {targets.length} emails at {delaySeconds}s each
-                      </span>
-                    </div>
-                  )}
-                </div>
-
-                <div className={cn("rounded-xl border-2 p-4 text-sm text-center font-medium transition-colors",
-                  targets.length === 0 ? "border-red-200 bg-red-50 text-red-700" : "border-emerald-200 bg-emerald-50 text-emerald-700")}>
-                  <span className="text-2xl font-bold">{targets.length}</span>
-                  <span className="ml-1.5">client(s) will receive this email</span>
-                  {useBatch && filteredBase.length > 0 && (
-                    <div className="text-xs mt-1 opacity-70">
-                      Rows {batchFrom || 1}–{batchTo || filteredBase.length} of {filteredBase.length} filtered
-                    </div>
-                  )}
-                </div>
-
-                {sending && (
-                  <div className="space-y-2">
-                    <Progress value={(progress.done / Math.max(progress.total, 1)) * 100} className="h-2" />
-                    <div className="flex justify-between text-xs text-slate-500">
-                      <span>{progress.done}/{progress.total} processed</span>
-                      <span>
-                        <span className="text-emerald-600 font-semibold">{progress.success} sent</span>
-                        {" · "}
-                        <span className="text-red-600 font-semibold">{progress.fail} failed</span>
-                      </span>
-                    </div>
-                    <Button type="button" variant="outline" className="w-full gap-2 border-amber-300 text-amber-700 hover:bg-amber-50"
-                      onClick={() => { setIsPausing(true); pauseRef.current = true; }} disabled={isPausing}>
-                      <Pause className="w-4 h-4" />
-                      {isPausing ? "Pausing after current email…" : "Pause Campaign"}
-                    </Button>
-                  </div>
-                )}
-
-                {!sending && (
-                  <Button type="submit" className="w-full h-10" disabled={targets.length === 0}>
-                    <Send className="w-4 h-4 mr-2" />
-                    Launch Campaign · {targets.length} recipients
-                  </Button>
-                )}
-              </form>
-            </DialogContent>
-          </Dialog>
-        </div>
-      </div>
+            </Link>
+          </>
+        }
+      />
 
       {!loading && (templates.length === 0 || clients.length === 0) && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
@@ -421,18 +208,23 @@ function CampaignsPage() {
         </div>
       )}
 
-      {sending && (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 flex items-center gap-3">
-          <div className="w-5 h-5 border-2 border-amber-500 border-t-transparent rounded-full animate-spin shrink-0" />
-          <div className="flex-1 min-w-0">
-            <div className="text-sm font-semibold text-amber-800">Sending in progress…</div>
-            <div className="mt-1.5">
-              <Progress value={(progress.done / Math.max(progress.total, 1)) * 100} className="h-1.5" />
-            </div>
-            <div className="text-xs text-amber-700 mt-1">{progress.done}/{progress.total} · ✓ {progress.success} · ✗ {progress.fail}</div>
-          </div>
+      <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm p-3 flex flex-col sm:flex-row gap-2">
+        <div className="relative flex-1">
+          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+          <Input placeholder="Search campaigns, templates, sender…" className="pl-9 h-9 bg-slate-50 border-slate-200" value={search} onChange={(e) => setSearch(e.target.value)} />
+          {search && (
+            <button onClick={() => setSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
-      )}
+        <Select value={status} onValueChange={(v) => setStatus(v as typeof status)}>
+          <SelectTrigger className="h-9 text-sm bg-slate-50 sm:w-44 shrink-0"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {STATUS_OPTIONS.map((s) => <SelectItem key={s} value={s} className="capitalize">{s === "all" ? "All statuses" : s}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </div>
 
       <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
@@ -456,19 +248,19 @@ function CampaignsPage() {
                     <div className="flex justify-center"><div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" /></div>
                   </td>
                 </tr>
-              ) : campaigns.length === 0 ? (
+              ) : filtered.length === 0 ? (
                 <tr>
                   <td colSpan={!isEmployee ? 8 : 7} className="px-4 py-14 text-center">
                     <div className="flex flex-col items-center gap-2">
                       <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center">
                         <Send className="w-4 h-4 text-slate-400" />
                       </div>
-                      <p className="text-sm font-medium text-slate-600">No campaigns yet</p>
-                      <p className="text-xs text-slate-400">Launch your first campaign to start reaching clients</p>
+                      <p className="text-sm font-medium text-slate-600">{hasFilters ? "No campaigns match your search" : "No campaigns yet"}</p>
+                      <p className="text-xs text-slate-400">{hasFilters ? "Try a different search or status filter" : "Launch your first campaign to start reaching clients"}</p>
                     </div>
                   </td>
                 </tr>
-              ) : campaigns.map((c) => {
+              ) : filtered.map((c) => {
                 const tpl = templates.find((t) => t.id === c.template_id);
                 const total = c.total_recipients || 1;
                 const rate = Math.round((c.success_count / total) * 100);
@@ -590,29 +382,6 @@ function CampaignsPage() {
           )}
         </DialogContent>
       </Dialog>
-    </div>
-  );
-}
-
-function formatDuration(totalSeconds: number): string {
-  if (totalSeconds < 60) return `~${totalSeconds}s`;
-  const m = Math.floor(totalSeconds / 60);
-  const s = totalSeconds % 60;
-  if (m < 60) return s > 0 ? `~${m}m ${s}s` : `~${m}m`;
-  const h = Math.floor(m / 60);
-  const rm = m % 60;
-  return rm > 0 ? `~${h}h ${rm}m` : `~${h}h`;
-}
-
-function FilterBlock({ icon: Icon, label, active, onToggle, children }: { icon: any; label: string; active: boolean; onToggle: (v: boolean) => void; children?: React.ReactNode }) {
-  return (
-    <div className={cn("rounded-xl border p-3 transition-all", active ? "border-primary/40 bg-primary/5" : "border-slate-200 bg-slate-50")}>
-      <label className="flex items-center gap-2.5 cursor-pointer">
-        <input type="checkbox" checked={active} onChange={(e) => onToggle(e.target.checked)} className="rounded accent-primary w-4 h-4" />
-        <Icon className={cn("w-4 h-4", active ? "text-primary" : "text-slate-400")} />
-        <span className={cn("text-sm font-medium", active ? "text-slate-800" : "text-slate-500")}>{label}</span>
-      </label>
-      {active && children}
     </div>
   );
 }

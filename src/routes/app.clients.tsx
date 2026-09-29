@@ -4,21 +4,22 @@ import { db, type Client } from "@/lib/db";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Plus, Search, FileSpreadsheet, Filter, MoreHorizontal, Trash2, Eye, X, ChevronDown, Download, RefreshCw, Pencil } from "lucide-react";
 import { toast } from "sonner";
 import { getSession } from "@/lib/session";
+import { getAvatarColor } from "@/lib/avatar";
+import { cn } from "@/lib/utils";
+import { PageHeader } from "@/components/PageHeader";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import * as XLSX from "xlsx";
 
 export const Route = createFileRoute("/app/clients")({
   component: ClientsPage,
 });
-
-const AVATAR_COLORS = ["bg-red-400","bg-orange-400","bg-amber-400","bg-lime-500","bg-green-500","bg-teal-500","bg-cyan-500","bg-sky-500","bg-blue-500","bg-indigo-500","bg-violet-500","bg-purple-500","bg-pink-500","bg-rose-400"];
-function getAvatarColor(name: string) { return AVATAR_COLORS[name.charCodeAt(0) % AVATAR_COLORS.length]; }
-function cn(...cls: (string | boolean | undefined | null)[]) { return cls.filter(Boolean).join(" "); }
 
 const EMPTY_FORM = { name: "", email: "", mobile: "", country: "", state: "", website: "", company: "" };
 
@@ -39,6 +40,10 @@ function ClientsPage() {
   const [addOpen, setAddOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<Client | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Client | null>(null);
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
 
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -128,11 +133,52 @@ function ClientsPage() {
     }
   };
 
-  const handleDelete = async (id: string, name: string) => {
-    if (!confirm(`Delete "${name}"? This cannot be undone.`)) return;
-    await db.clients.delete(id);
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    await db.clients.delete(deleteTarget.id);
     toast.success("Client deleted");
+    setDeleteTarget(null);
     await load();
+  };
+
+  const toggleSelected = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    setSelected((prev) => (prev.size === filtered.length ? new Set() : new Set(filtered.map((c) => c.id))));
+  };
+
+  const exportRows = (rows: Client[], label: string) => {
+    if (rows.length === 0) { toast.error("No clients to export"); return; }
+    const sheetRows = rows.map((c) => ({
+      Name: c.name, Email: c.email, Mobile: c.mobile, Country: c.country,
+      State: c.state ?? "", Company: c.company ?? "", Website: c.website ?? "",
+      "Added By": c.added_by, "Date Added": new Date(c.created_at).toLocaleDateString(),
+    }));
+    const ws = XLSX.utils.json_to_sheet(sheetRows);
+    ws["!cols"] = [{ wch: 22 }, { wch: 28 }, { wch: 16 }, { wch: 14 }, { wch: 14 }, { wch: 20 }, { wch: 24 }, { wch: 14 }, { wch: 14 }];
+    const wbOut = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wbOut, ws, "Clients");
+    XLSX.writeFile(wbOut, `starlink_jewels_clients_${label}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    toast.success(`Exported ${rows.length} clients`);
+  };
+
+  const bulkDelete = async () => {
+    setBulkDeleting(true);
+    try {
+      await Promise.all(Array.from(selected).map((id) => db.clients.delete(id)));
+      toast.success(`${selected.size} client(s) deleted`);
+      setSelected(new Set());
+      setBulkDeleteOpen(false);
+      await load();
+    } finally {
+      setBulkDeleting(false);
+    }
   };
 
   const handleExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -203,77 +249,72 @@ function ClientsPage() {
   };
 
   const handleExport = () => {
-    if (filtered.length === 0) { toast.error("No clients to export"); return; }
-    const rows = filtered.map((c) => ({
-      Name: c.name,
-      Email: c.email,
-      Mobile: c.mobile,
-      Country: c.country,
-      State: c.state ?? "",
-      Company: c.company ?? "",
-      Website: c.website ?? "",
-      "Added By": c.added_by,
-      "Date Added": new Date(c.created_at).toLocaleDateString(),
-    }));
-    const ws = XLSX.utils.json_to_sheet(rows);
-    ws["!cols"] = [{ wch: 22 }, { wch: 28 }, { wch: 16 }, { wch: 14 }, { wch: 14 }, { wch: 20 }, { wch: 24 }, { wch: 14 }, { wch: 14 }];
-    const wbOut = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wbOut, ws, "Clients");
     const label = [
       country !== "all" ? country : "",
       !isEmployee && addedBy !== "all" ? addedBy : "",
       dateFrom ? `from-${dateFrom}` : "",
       dateTo ? `to-${dateTo}` : "",
     ].filter(Boolean).join("_") || "all";
-    XLSX.writeFile(wbOut, `starlink_jewels_clients_${label}_${new Date().toISOString().slice(0, 10)}.xlsx`);
-    toast.success(`Exported ${filtered.length} clients`);
+    exportRows(filtered, label);
   };
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div>
-          <div className="flex items-center gap-2.5">
-            <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Clients</h1>
-            <span className="px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-600 text-xs font-semibold">{clients.length}</span>
-          </div>
-          <p className="text-sm text-slate-500 mt-0.5">
-            {isEmployee ? "Your added clients" : "Manage and organize all your contacts"}
-          </p>
-        </div>
-        <div className="flex gap-2 flex-wrap">
-          <Button variant="outline" size="sm" className="gap-1.5 shadow-sm" onClick={() => load()} disabled={loading}>
-            <RefreshCw className={cn("w-4 h-4", loading && "animate-spin")} />Refresh
-          </Button>
-          <Button variant="outline" size="sm" className="gap-1.5 shadow-sm" onClick={handleExport}>
-            <Download className="w-4 h-4" />Export
-          </Button>
-          <label className="cursor-pointer">
-            <input type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleExcel} disabled={uploading} />
-            <span className={cn("inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-sm font-medium text-slate-700 transition-colors shadow-sm cursor-pointer", uploading && "opacity-60 pointer-events-none")}>
-              <FileSpreadsheet className="w-4 h-4" />
-              {uploading && importProgress
-                ? `${importProgress.done}/${importProgress.total}…`
-                : uploading ? "Reading…" : "Import Excel"}
-            </span>
-          </label>
+      <PageHeader
+        title="Clients"
+        count={clients.length}
+        subtitle={isEmployee ? "Your added clients" : "Manage and organize all your contacts"}
+        actions={
+          <>
+            <Button variant="outline" size="sm" className="gap-1.5 shadow-sm" onClick={() => load()} disabled={loading}>
+              <RefreshCw className={cn("w-4 h-4", loading && "animate-spin")} />Refresh
+            </Button>
+            <Button variant="outline" size="sm" className="gap-1.5 shadow-sm" onClick={handleExport}>
+              <Download className="w-4 h-4" />Export
+            </Button>
+            <label className="cursor-pointer">
+              <input type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleExcel} disabled={uploading} />
+              <span className={cn("inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-sm font-medium text-slate-700 transition-colors shadow-sm cursor-pointer", uploading && "opacity-60 pointer-events-none")}>
+                <FileSpreadsheet className="w-4 h-4" />
+                {uploading && importProgress
+                  ? `${importProgress.done}/${importProgress.total}…`
+                  : uploading ? "Reading…" : "Import Excel"}
+              </span>
+            </label>
 
-          <Dialog open={addOpen} onOpenChange={setAddOpen}>
-            <DialogTrigger asChild>
-              <Button className="gap-1.5 shadow-sm shadow-primary/20"><Plus className="w-4 h-4" />Add Client</Button>
-            </DialogTrigger>
-            <DialogContent className="max-w-md">
-              <DialogHeader><DialogTitle>Add New Client</DialogTitle></DialogHeader>
-              <form onSubmit={handleAdd} className="space-y-3">
-                <ClientFormFields form={form} setForm={setForm} autoFocus />
-                <Button type="submit" className="w-full mt-1" disabled={saving}>
-                  {saving ? <Spinner label="Saving…" /> : "Add Client"}
-                </Button>
-              </form>
-            </DialogContent>
-          </Dialog>
+            <Dialog open={addOpen} onOpenChange={setAddOpen}>
+              <DialogTrigger asChild>
+                <Button className="gap-1.5 shadow-sm shadow-primary/20"><Plus className="w-4 h-4" />Add Client</Button>
+              </DialogTrigger>
+              <DialogContent className="max-w-md">
+                <DialogHeader><DialogTitle>Add New Client</DialogTitle></DialogHeader>
+                <form onSubmit={handleAdd} className="space-y-3">
+                  <ClientFormFields form={form} setForm={setForm} autoFocus />
+                  <Button type="submit" className="w-full mt-1" disabled={saving}>
+                    {saving ? <Spinner label="Saving…" /> : "Add Client"}
+                  </Button>
+                </form>
+              </DialogContent>
+            </Dialog>
+          </>
+        }
+      />
+
+      {selected.size > 0 && (
+        <div className="sticky top-[76px] z-20 bg-slate-900 text-white rounded-xl shadow-lg px-4 py-2.5 flex items-center gap-3">
+          <span className="text-sm font-medium">{selected.size} selected</span>
+          <div className="flex-1" />
+          <Button size="sm" variant="secondary" className="gap-1.5 h-8" onClick={() => exportRows(filtered.filter((c) => selected.has(c.id)), "selected")}>
+            <Download className="w-3.5 h-3.5" />Export selected
+          </Button>
+          <Button size="sm" variant="destructive" className="gap-1.5 h-8" onClick={() => setBulkDeleteOpen(true)}>
+            <Trash2 className="w-3.5 h-3.5" />Delete selected
+          </Button>
+          <button onClick={() => setSelected(new Set())} className="p-1.5 rounded-lg hover:bg-white/10 transition-colors">
+            <X className="w-4 h-4" />
+          </button>
         </div>
-      </div>
+      )}
 
       {uploading && importProgress && (
         <div className="bg-blue-50 border border-blue-200 rounded-xl p-3.5 flex items-center gap-3">
@@ -349,6 +390,13 @@ function ClientsPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-slate-100 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-800/50">
+                <th className="px-3 py-3 text-center w-10">
+                  <Checkbox
+                    checked={filtered.length > 0 && selected.size === filtered.length}
+                    onCheckedChange={toggleSelectAll}
+                    aria-label="Select all"
+                  />
+                </th>
                 <th className="px-3 py-3 text-center text-xs font-semibold text-slate-400 uppercase tracking-wider w-10">#</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Client</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider hidden md:table-cell">Email</th>
@@ -363,11 +411,11 @@ function ClientsPage() {
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {loading ? (
-                <tr><td colSpan={9} className="px-4 py-14 text-center">
+                <tr><td colSpan={10} className="px-4 py-14 text-center">
                   <div className="flex justify-center"><div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" /></div>
                 </td></tr>
               ) : filtered.length === 0 ? (
-                <tr><td colSpan={9} className="px-4 py-14 text-center">
+                <tr><td colSpan={10} className="px-4 py-14 text-center">
                   <div className="flex flex-col items-center gap-2">
                     <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center"><Search className="w-4 h-4 text-slate-400" /></div>
                     <p className="text-sm font-medium text-slate-600">No clients found</p>
@@ -375,7 +423,10 @@ function ClientsPage() {
                   </div>
                 </td></tr>
               ) : filtered.map((c, idx) => (
-                <tr key={c.id} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/30 transition-colors">
+                <tr key={c.id} className={cn("hover:bg-slate-50/70 dark:hover:bg-slate-800/30 transition-colors", selected.has(c.id) && "bg-primary/5")}>
+                  <td className="px-3 py-3 text-center">
+                    <Checkbox checked={selected.has(c.id)} onCheckedChange={() => toggleSelected(c.id)} aria-label={`Select ${c.name}`} />
+                  </td>
                   <td className="px-3 py-3 text-center text-xs font-mono text-slate-400 select-none">{clients.indexOf(c) + 1}</td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-3">
@@ -423,7 +474,7 @@ function ClientsPage() {
                             <Pencil className="w-3.5 h-3.5" /> Edit
                           </DropdownMenuItem>
                           <DropdownMenuSeparator />
-                          <DropdownMenuItem className="text-destructive focus:text-destructive gap-2 cursor-pointer" onClick={() => handleDelete(c.id, c.name)}>
+                          <DropdownMenuItem className="text-destructive focus:text-destructive gap-2 cursor-pointer" onClick={() => setDeleteTarget(c)}>
                             <Trash2 className="w-3.5 h-3.5" /> Delete
                           </DropdownMenuItem>
                         </DropdownMenuContent>
@@ -455,6 +506,22 @@ function ClientsPage() {
           </form>
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        onOpenChange={(v) => { if (!v) setDeleteTarget(null); }}
+        title={`Delete "${deleteTarget?.name}"?`}
+        description="This client and their email history will be permanently removed. This cannot be undone."
+        onConfirm={confirmDelete}
+      />
+      <ConfirmDialog
+        open={bulkDeleteOpen}
+        onOpenChange={setBulkDeleteOpen}
+        title={`Delete ${selected.size} client(s)?`}
+        description="These clients will be permanently removed. This cannot be undone."
+        confirmLabel={bulkDeleting ? "Deleting…" : "Delete all"}
+        onConfirm={bulkDelete}
+      />
     </div>
   );
 }

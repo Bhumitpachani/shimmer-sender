@@ -1,12 +1,48 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
-import { db, type Campaign, type Client, type Template } from "@/lib/db";
+import { useEffect, useMemo, useState } from "react";
+import { db, type Campaign, type Client, type SendHistory, type Template } from "@/lib/db";
 import { getSession } from "@/lib/session";
-import { Users, Mail, Send, CheckCircle2, XCircle, ArrowRight, Plus, TrendingUp, Activity } from "lucide-react";
+import { getAvatarColor } from "@/lib/avatar";
+import { cn } from "@/lib/utils";
+import { StatCard } from "@/components/StatCard";
+import { Users, Mail, Send, CheckCircle2, XCircle, ArrowRight, Plus, Activity, BarChart3 } from "lucide-react";
+import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
+import { ChartContainer, ChartTooltip, ChartTooltipContent, ChartLegend, ChartLegendContent, type ChartConfig } from "@/components/ui/chart";
 
 export const Route = createFileRoute("/app/")({
   component: Dashboard,
 });
+
+const TREND_DAYS = 14;
+
+const chartConfig = {
+  delivered: { label: "Delivered", color: "#10b981" },
+  failed: { label: "Failed", color: "#ef4444" },
+} satisfies ChartConfig;
+
+function buildTrend(history: SendHistory[]) {
+  const days: { key: string; label: string; delivered: number; failed: number }[] = [];
+  const byKey = new Map<string, { delivered: number; failed: number }>();
+  for (let i = TREND_DAYS - 1; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    const key = d.toISOString().slice(0, 10);
+    days.push({ key, label: d.toLocaleDateString(undefined, { month: "short", day: "numeric" }), delivered: 0, failed: 0 });
+    byKey.set(key, { delivered: 0, failed: 0 });
+  }
+  for (const h of history) {
+    const key = h.sent_at.slice(0, 10);
+    const bucket = byKey.get(key);
+    if (!bucket) continue;
+    if (h.status === "success") bucket.delivered++; else bucket.failed++;
+  }
+  for (const day of days) {
+    const bucket = byKey.get(day.key)!;
+    day.delivered = bucket.delivered;
+    day.failed = bucket.failed;
+  }
+  return days;
+}
 
 function Dashboard() {
   const session = getSession();
@@ -20,6 +56,7 @@ function Dashboard() {
   const [recentCampaigns, setRecentCampaigns] = useState<Campaign[]>([]);
   const [recentClients, setRecentClients] = useState<Client[]>([]);
   const [templates, setTemplates] = useState<Template[]>([]);
+  const [history, setHistory] = useState<SendHistory[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -28,21 +65,20 @@ function Dashboard() {
       db.clients.getAll(),
       db.templates.getAll(),
       db.campaigns.getAll(),
-      db.sendHistory.countByStatus("success"),
-      db.sendHistory.countByStatus("fail"),
-    ]).then(([allClients, allTemplates, allCampaigns, success, fail]) => {
-      setStats({
-        clients: allClients.length,
-        templates: allTemplates.length,
-        campaigns: allCampaigns.length,
-        success,
-        fail,
-      });
+      db.sendHistory.getAll(),
+    ]).then(([allClients, allTemplates, allCampaigns, allHistory]) => {
+      const success = allHistory.filter((h) => h.status === "success").length;
+      const fail = allHistory.filter((h) => h.status === "fail").length;
+      setStats({ clients: allClients.length, templates: allTemplates.length, campaigns: allCampaigns.length, success, fail });
       setRecentCampaigns(allCampaigns.slice(0, 6));
       setRecentClients(allClients.slice(0, 5));
       setTemplates(allTemplates);
+      setHistory(allHistory);
     }).finally(() => setLoading(false));
   }, []);
+
+  const trend = useMemo(() => buildTrend(history), [history]);
+  const trendTotal = useMemo(() => trend.reduce((sum, d) => sum + d.delivered + d.failed, 0), [trend]);
 
   if (session?.role === "employee") return null;
 
@@ -64,7 +100,7 @@ function Dashboard() {
               <Plus className="w-3.5 h-3.5" /> Add Client
             </button>
           </Link>
-          <Link to="/app/campaigns">
+          <Link to="/app/campaigns/new">
             <button className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-primary text-white text-sm font-medium hover:bg-primary/90 transition-colors shadow-sm shadow-primary/20">
               <Send className="w-3.5 h-3.5" /> New Campaign
             </button>
@@ -73,11 +109,49 @@ function Dashboard() {
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
-        <StatCard icon={Users} label="Total Clients" value={stats.clients} color="blue" sub="All contacts" loading={loading} />
-        <StatCard icon={Mail} label="Templates" value={stats.templates} color="violet" sub="Email designs" loading={loading} />
-        <StatCard icon={Send} label="Campaigns" value={stats.campaigns} color="amber" sub="All time" loading={loading} />
-        <StatCard icon={CheckCircle2} label="Emails Sent" value={stats.success} color="emerald" sub={`${successRate}% success rate`} loading={loading} />
-        <StatCard icon={XCircle} label="Failed" value={stats.fail} color="red" sub="Delivery issues" loading={loading} />
+        <StatCard icon={Users} label="Total Clients" value={stats.clients} tone="blue" sub="All contacts" loading={loading} />
+        <StatCard icon={Mail} label="Templates" value={stats.templates} tone="violet" sub="Email designs" loading={loading} />
+        <StatCard icon={Send} label="Campaigns" value={stats.campaigns} tone="amber" sub="All time" loading={loading} />
+        <StatCard icon={CheckCircle2} label="Emails Sent" value={stats.success} tone="emerald" sub={`${successRate}% success rate`} loading={loading} />
+        <StatCard icon={XCircle} label="Failed" value={stats.fail} tone="red" sub="Delivery issues" loading={loading} />
+      </div>
+
+      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 dark:border-slate-800">
+          <div className="flex items-center gap-2">
+            <BarChart3 className="w-4 h-4 text-slate-400" />
+            <span className="font-semibold text-slate-800 dark:text-white">Delivery Activity</span>
+            <span className="text-xs text-slate-400">· last {TREND_DAYS} days</span>
+          </div>
+          <span className="text-xs text-slate-400 bg-slate-100 dark:bg-slate-800 px-2.5 py-1 rounded-full font-medium">{trendTotal} sent</span>
+        </div>
+        <div className="p-4">
+          {loading ? (
+            <div className="flex justify-center py-16">
+              <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+            </div>
+          ) : trendTotal === 0 ? (
+            <div className="flex flex-col items-center justify-center py-12 text-center">
+              <div className="w-12 h-12 rounded-2xl bg-slate-100 flex items-center justify-center mb-3">
+                <BarChart3 className="w-5 h-5 text-slate-400" />
+              </div>
+              <p className="text-sm font-medium text-slate-600">No send activity yet</p>
+              <p className="text-xs text-slate-400 mt-1">Launch a campaign to see delivery trends here.</p>
+            </div>
+          ) : (
+            <ChartContainer config={chartConfig} className="aspect-auto h-[260px] w-full">
+              <BarChart data={trend} barCategoryGap={6}>
+                <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="var(--border)" />
+                <XAxis dataKey="label" tickLine={false} axisLine={false} tickMargin={8} fontSize={11} interval="preserveStartEnd" />
+                <YAxis tickLine={false} axisLine={false} tickMargin={8} fontSize={11} allowDecimals={false} width={28} />
+                <ChartTooltip content={<ChartTooltipContent />} />
+                <ChartLegend content={<ChartLegendContent />} />
+                <Bar dataKey="delivered" stackId="a" fill="var(--color-delivered)" radius={[0, 0, 3, 3]} stroke="#fff" strokeWidth={2} />
+                <Bar dataKey="failed" stackId="a" fill="var(--color-failed)" radius={[3, 3, 0, 0]} stroke="#fff" strokeWidth={2} />
+              </BarChart>
+            </ChartContainer>
+          )}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -103,7 +177,7 @@ function Dashboard() {
                 </div>
                 <p className="text-sm font-medium text-slate-600">No campaigns yet</p>
                 <p className="text-xs text-slate-400 mt-1">Start a campaign to reach your clients</p>
-                <Link to="/app/campaigns">
+                <Link to="/app/campaigns/new">
                   <button className="mt-4 px-4 py-2 text-xs font-medium bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors">
                     Start Campaign
                   </button>
@@ -154,7 +228,7 @@ function Dashboard() {
               {[
                 { icon: Users, label: "Add New Client", desc: "Add a contact manually", to: "/app/clients", color: "text-blue-600 bg-blue-50" },
                 { icon: Mail, label: "Create Template", desc: "Design a new email", to: "/app/templates", color: "text-violet-600 bg-violet-50" },
-                { icon: Send, label: "Start Campaign", desc: "Send bulk emails", to: "/app/campaigns", color: "text-amber-600 bg-amber-50" },
+                { icon: Send, label: "Start Campaign", desc: "Send bulk emails", to: "/app/campaigns/new", color: "text-amber-600 bg-amber-50" },
               ].map((a) => (
                 <Link key={a.label} to={a.to as any}>
                   <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-slate-50 transition-colors cursor-pointer group">
@@ -216,43 +290,6 @@ function getGreeting() {
 
 function statusBg(s: string) {
   return s === "completed" ? "bg-emerald-500" : s === "running" ? "bg-amber-500" : s === "failed" ? "bg-red-500" : "bg-slate-400";
-}
-
-function cn(...cls: (string | boolean | undefined | null)[]) {
-  return cls.filter(Boolean).join(" ");
-}
-
-const AVATAR_COLORS = ["bg-red-400", "bg-orange-400", "bg-amber-400", "bg-lime-500", "bg-green-500", "bg-teal-500", "bg-cyan-500", "bg-sky-500", "bg-blue-500", "bg-indigo-500", "bg-violet-500", "bg-purple-500", "bg-pink-500", "bg-rose-400"];
-function getAvatarColor(name: string) {
-  return AVATAR_COLORS[name.charCodeAt(0) % AVATAR_COLORS.length];
-}
-
-function StatCard({ icon: Icon, label, value, color, sub, loading }: { icon: any; label: string; value: number; color: string; sub: string; loading?: boolean }) {
-  const colors: Record<string, string> = {
-    blue: "bg-blue-50 text-blue-600",
-    violet: "bg-violet-50 text-violet-600",
-    amber: "bg-amber-50 text-amber-600",
-    emerald: "bg-emerald-50 text-emerald-600",
-    red: "bg-red-50 text-red-500",
-  };
-  return (
-    <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-5">
-      <div className="flex items-start justify-between gap-2">
-        <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center shrink-0", colors[color])}>
-          <Icon className="w-5 h-5" />
-        </div>
-      </div>
-      <div className="mt-3">
-        {loading ? (
-          <div className="h-8 w-16 bg-slate-100 rounded animate-pulse" />
-        ) : (
-          <div className="text-2xl font-bold text-slate-900 dark:text-white">{value.toLocaleString()}</div>
-        )}
-        <div className="text-sm font-medium text-slate-600 dark:text-slate-300 mt-0.5">{label}</div>
-        <div className="text-xs text-slate-400 mt-0.5">{sub}</div>
-      </div>
-    </div>
-  );
 }
 
 function StatusBadge({ status }: { status: string }) {

@@ -6,16 +6,15 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { Plus, Trash2, Pencil, Code2, Eye, Mail } from "lucide-react";
+import { Plus, Trash2, Pencil, Copy, Code2, Eye, Mail } from "lucide-react";
 import { toast } from "sonner";
 import { getSession } from "@/lib/session";
+import { PageHeader } from "@/components/PageHeader";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 
 export const Route = createFileRoute("/app/templates")({
   component: TemplatesPage,
 });
-
-function cn(...cls: (string | boolean | undefined | null)[]) { return cls.filter(Boolean).join(" "); }
 
 const SAMPLE = `<div style="font-family: -apple-system, Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #ffffff;">
   <div style="background: linear-gradient(135deg, #3b82f6, #8b5cf6); padding: 40px 32px; text-align: center; border-radius: 12px 12px 0 0;">
@@ -48,6 +47,7 @@ function TemplatesPage() {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Template | null>(null);
   const [form, setForm] = useState({ name: "", subject: "", html: SAMPLE });
+  const [deleteTarget, setDeleteTarget] = useState<Template | null>(null);
 
   useEffect(() => {
     if (session && session.role !== "admin") navigate({ to: "/app/clients" });
@@ -66,6 +66,7 @@ function TemplatesPage() {
 
   const openNew = () => { setEditing(null); setForm({ name: "", subject: "", html: SAMPLE }); setOpen(true); };
   const openEdit = (t: Template) => { setEditing(t); setForm({ name: t.name, subject: t.subject, html: t.html }); setOpen(true); };
+  const openDuplicate = (t: Template) => { setEditing(null); setForm({ name: `${t.name} (Copy)`, subject: t.subject, html: t.html }); setOpen(true); };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -85,10 +86,11 @@ function TemplatesPage() {
     }
   };
 
-  const handleDelete = async (id: string, name: string) => {
-    if (!confirm(`Delete template "${name}"?`)) return;
-    await db.templates.delete(id);
-    toast.success("Deleted");
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    await db.templates.delete(deleteTarget.id);
+    toast.success("Template deleted");
+    setDeleteTarget(null);
     await load();
   };
 
@@ -96,18 +98,16 @@ function TemplatesPage() {
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div>
-          <div className="flex items-center gap-2.5">
-            <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Email Templates</h1>
-            <span className="px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-600 text-xs font-semibold">{templates.length}</span>
-          </div>
-          <p className="text-sm text-slate-500 mt-0.5">Design and manage your reusable email templates</p>
-        </div>
-        <Button onClick={openNew} className="gap-1.5 shadow-sm shadow-primary/20">
-          <Plus className="w-4 h-4" />New Template
-        </Button>
-      </div>
+      <PageHeader
+        title="Email Templates"
+        count={templates.length}
+        subtitle="Design and manage your reusable email templates"
+        actions={
+          <Button onClick={openNew} className="gap-1.5 shadow-sm shadow-primary/20">
+            <Plus className="w-4 h-4" />New Template
+          </Button>
+        }
+      />
 
       {loading ? (
         <div className="flex justify-center py-20">
@@ -150,7 +150,15 @@ function TemplatesPage() {
                     <Pencil className="w-3 h-3" />Edit
                   </button>
                   <button
-                    onClick={() => handleDelete(t.id, t.name)}
+                    onClick={() => openDuplicate(t)}
+                    title="Duplicate"
+                    className="p-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-400 hover:text-slate-700 transition-colors"
+                  >
+                    <Copy className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    onClick={() => setDeleteTarget(t)}
+                    title="Delete"
                     className="p-1.5 rounded-lg border border-slate-200 hover:border-red-200 hover:bg-red-50 text-slate-400 hover:text-red-600 transition-colors"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
@@ -163,7 +171,7 @@ function TemplatesPage() {
       )}
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-4xl max-h-[92vh] flex flex-col overflow-hidden p-0">
+        <DialogContent className="max-w-6xl w-[95vw] h-[90vh] flex flex-col overflow-hidden p-0">
           <DialogHeader className="px-6 pt-6 pb-0 shrink-0">
             <DialogTitle>{editing ? "Edit Template" : "New Email Template"}</DialogTitle>
           </DialogHeader>
@@ -178,23 +186,25 @@ function TemplatesPage() {
                 <Input required value={form.subject} onChange={(e) => setForm({ ...form, subject: e.target.value })} placeholder="Welcome to Starlink Jewels ✨" className="mt-1.5" />
               </div>
             </div>
-            <Tabs defaultValue="html" className="flex flex-col flex-1 min-h-0">
-              <TabsList className="w-fit shrink-0">
-                <TabsTrigger value="html" className="gap-1.5 text-xs"><Code2 className="w-3.5 h-3.5" />HTML Editor</TabsTrigger>
-                <TabsTrigger value="preview" className="gap-1.5 text-xs"><Eye className="w-3.5 h-3.5" />Preview</TabsTrigger>
-              </TabsList>
-              <TabsContent value="html" className="flex-1 mt-2 min-h-0">
+
+            <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <div className="flex flex-col min-h-0">
+                <Label className="text-sm font-medium flex items-center gap-1.5 mb-1.5"><Code2 className="w-3.5 h-3.5" />HTML</Label>
                 <Textarea
                   value={form.html}
                   onChange={(e) => setForm({ ...form, html: e.target.value })}
-                  className="font-mono text-xs h-full min-h-[300px] resize-none bg-slate-950 text-slate-300 border-slate-800 rounded-xl"
+                  className="font-mono text-xs flex-1 min-h-[240px] resize-none bg-slate-950 text-slate-300 border-slate-800 rounded-xl"
                   placeholder="<html>…"
                 />
-              </TabsContent>
-              <TabsContent value="preview" className="flex-1 mt-2 min-h-0 border rounded-xl overflow-hidden bg-white">
-                <iframe srcDoc={form.html} className="w-full h-full min-h-[300px]" sandbox="" title="preview" />
-              </TabsContent>
-            </Tabs>
+              </div>
+              <div className="flex flex-col min-h-0">
+                <Label className="text-sm font-medium flex items-center gap-1.5 mb-1.5"><Eye className="w-3.5 h-3.5" />Live Preview</Label>
+                <div className="flex-1 min-h-[240px] border border-slate-200 rounded-xl overflow-hidden bg-white">
+                  <iframe srcDoc={form.html} className="w-full h-full" sandbox="" title="preview" />
+                </div>
+              </div>
+            </div>
+
             <div className="flex justify-end gap-3 shrink-0">
               <Button type="button" variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
               <Button type="submit" disabled={saving}>
@@ -204,6 +214,14 @@ function TemplatesPage() {
           </form>
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        onOpenChange={(v) => { if (!v) setDeleteTarget(null); }}
+        title={`Delete template "${deleteTarget?.name}"?`}
+        description="Campaigns that already used this template keep their send history, but you won't be able to select it for new campaigns. This cannot be undone."
+        onConfirm={confirmDelete}
+      />
     </div>
   );
 }

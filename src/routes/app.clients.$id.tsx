@@ -7,17 +7,12 @@ import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ArrowLeft, CheckCircle2, XCircle, Mail, Phone, Globe, Building2, MapPin, AlertCircle, Pencil } from "lucide-react";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils";
+import { getAvatarColor } from "@/lib/avatar";
 
 export const Route = createFileRoute("/app/clients/$id")({
   component: ClientDetail,
 });
-
-function cn(...cls: (string | boolean | undefined | null)[]) {
-  return cls.filter(Boolean).join(" ");
-}
-
-const AVATAR_COLORS = ["bg-red-400","bg-orange-400","bg-amber-400","bg-lime-500","bg-green-500","bg-teal-500","bg-cyan-500","bg-sky-500","bg-blue-500","bg-indigo-500","bg-violet-500","bg-purple-500","bg-pink-500","bg-rose-400"];
-function getAvatarColor(name: string) { return AVATAR_COLORS[name.charCodeAt(0) % AVATAR_COLORS.length]; }
 
 function ClientDetail() {
   const { id } = Route.useParams();

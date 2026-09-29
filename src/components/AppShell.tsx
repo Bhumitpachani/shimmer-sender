@@ -5,11 +5,12 @@ import { pingMail } from "@/lib/mailApi";
 import {
   LayoutDashboard, Users, Mail, Send, UserCog, LogOut, Sparkles,
   Wifi, WifiOff, RefreshCw, Menu, ChevronLeft, ChevronRight,
-  ChevronDown,
+  ChevronDown, Search,
 } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { CommandPalette } from "@/components/CommandPalette";
 import { cn } from "@/lib/utils";
 
 const PAGE_TITLES: Record<string, string> = {
@@ -21,6 +22,7 @@ const PAGE_TITLES: Record<string, string> = {
 };
 function getPageTitle(p: string) {
   if (PAGE_TITLES[p]) return PAGE_TITLES[p];
+  if (p === "/app/campaigns/new") return "New Campaign";
   if (p.startsWith("/app/campaigns/")) return "Campaign Details";
   if (p.startsWith("/app/clients/")) return "Client Details";
   return "Dashboard";
@@ -67,6 +69,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [checking, setChecking] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setPaletteOpen((v) => !v);
+      }
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, []);
 
   useEffect(() => {
     if (!session) { navigate({ to: "/login" }); return; }
@@ -187,6 +201,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="min-h-screen flex bg-slate-100 dark:bg-slate-950">
+      <CommandPalette session={session} open={paletteOpen} onOpenChange={setPaletteOpen} />
       <div className="hidden lg:flex sticky top-0 h-screen shrink-0 relative overflow-visible">
         <SidebarInner compact={collapsed} />
         <button
@@ -211,6 +226,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </button>
           <h2 className="font-semibold text-slate-800 dark:text-white text-[15px]">{pageTitle}</h2>
           <div className="flex-1" />
+          <button
+            onClick={() => setPaletteOpen(true)}
+            className="hidden sm:flex items-center gap-2 text-xs text-slate-400 px-3 py-1.5 rounded-lg border border-slate-200 hover:border-slate-300 hover:text-slate-600 transition-colors"
+          >
+            <Search className="w-3.5 h-3.5" />
+            <span>Search…</span>
+            <kbd className="ml-2 px-1.5 py-0.5 rounded bg-slate-100 text-[10px] font-mono text-slate-500">⌘K</kbd>
+          </button>
           <button
             onClick={check}
             disabled={checking}
