@@ -87,24 +87,28 @@ function Dashboard() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-white">
-            Good {getGreeting()}, {session?.name?.split(" ")[0] ?? "Admin"} 👋
-          </h1>
-          <p className="text-slate-500 text-sm mt-0.5">Here's what's happening with your campaigns.</p>
-        </div>
-        <div className="flex gap-2">
-          <Link to="/app/clients">
-            <button className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-sm font-medium text-slate-700 transition-colors shadow-sm">
-              <Plus className="w-3.5 h-3.5" /> Add Client
-            </button>
-          </Link>
-          <Link to="/app/campaigns/new">
-            <button className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-primary text-white text-sm font-medium hover:bg-primary/90 transition-colors shadow-sm shadow-primary/20">
-              <Send className="w-3.5 h-3.5" /> New Campaign
-            </button>
-          </Link>
+      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-[#0f172a] via-[oklch(0.35_0.14_262)] to-[oklch(0.4_0.18_280)] px-6 py-7 sm:px-8 shadow-lg shadow-primary/20">
+        <div className="absolute -right-10 -top-16 w-64 h-64 rounded-full bg-white/10 blur-3xl pointer-events-none" />
+        <div className="absolute -bottom-20 left-1/3 w-72 h-72 rounded-full bg-violet-400/10 blur-3xl pointer-events-none" />
+        <div className="relative flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div>
+            <h1 className="text-2xl sm:text-3xl font-bold text-white">
+              Good {getGreeting()}, {session?.name?.split(" ")[0] ?? "Admin"} 👋
+            </h1>
+            <p className="text-slate-300 text-sm mt-1">Here's what's happening with your campaigns.</p>
+          </div>
+          <div className="flex gap-2 shrink-0">
+            <Link to="/app/clients">
+              <button className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-white/20 bg-white/10 hover:bg-white/20 text-sm font-medium text-white backdrop-blur-sm transition-colors">
+                <Plus className="w-3.5 h-3.5" /> Add Client
+              </button>
+            </Link>
+            <Link to="/app/campaigns/new">
+              <button className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-white text-slate-900 text-sm font-semibold hover:bg-white/90 transition-colors shadow-lg shadow-black/20">
+                <Send className="w-3.5 h-3.5" /> New Campaign
+              </button>
+            </Link>
+          </div>
         </div>
       </div>
 
@@ -226,13 +230,13 @@ function Dashboard() {
             </div>
             <div className="p-3 space-y-1.5">
               {[
-                { icon: Users, label: "Add New Client", desc: "Add a contact manually", to: "/app/clients", color: "text-blue-600 bg-blue-50" },
-                { icon: Mail, label: "Create Template", desc: "Design a new email", to: "/app/templates", color: "text-violet-600 bg-violet-50" },
-                { icon: Send, label: "Start Campaign", desc: "Send bulk emails", to: "/app/campaigns/new", color: "text-amber-600 bg-amber-50" },
+                { icon: Users, label: "Add New Client", desc: "Add a contact manually", to: "/app/clients", color: "bg-gradient-to-br from-blue-500 to-blue-600 shadow-blue-500/30" },
+                { icon: Mail, label: "Create Template", desc: "Design a new email", to: "/app/templates", color: "bg-gradient-to-br from-violet-500 to-violet-600 shadow-violet-500/30" },
+                { icon: Send, label: "Start Campaign", desc: "Send bulk emails", to: "/app/campaigns/new", color: "bg-gradient-to-br from-amber-400 to-amber-500 shadow-amber-500/30" },
               ].map((a) => (
                 <Link key={a.label} to={a.to as any}>
                   <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-slate-50 transition-colors cursor-pointer group">
-                    <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center shrink-0", a.color)}>
+                    <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center shrink-0 text-white shadow-md", a.color)}>
                       <a.icon className="w-4 h-4" />
                     </div>
                     <div className="flex-1 min-w-0">

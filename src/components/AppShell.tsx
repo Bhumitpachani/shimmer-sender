@@ -200,7 +200,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   );
 
   return (
-    <div className="min-h-screen flex bg-slate-100 dark:bg-slate-950">
+    <div className="min-h-screen flex bg-gradient-to-br from-slate-100 via-blue-50/40 to-violet-50/40 dark:from-slate-950 dark:via-slate-950 dark:to-slate-950">
       <CommandPalette session={session} open={paletteOpen} onOpenChange={setPaletteOpen} />
       <div className="hidden lg:flex sticky top-0 h-screen shrink-0 relative overflow-visible">
         <SidebarInner compact={collapsed} />
@@ -220,7 +220,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       )}
 
       <div className="flex-1 flex flex-col min-w-0">
-        <header className="h-16 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 flex items-center px-4 sm:px-6 gap-4 sticky top-0 z-30 shadow-sm">
+        <header className="h-16 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 flex items-center px-4 sm:px-6 gap-4 sticky top-0 z-30 shadow-sm">
           <button className="lg:hidden p-2 -ml-1 rounded-lg hover:bg-slate-100 transition-colors" onClick={() => setMobileOpen(true)}>
             <Menu className="w-5 h-5 text-slate-600" />
           </button>

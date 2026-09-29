@@ -19,7 +19,7 @@ export function PageHeader({
         <div className="flex items-center gap-2.5">
           <h1 className="text-2xl font-bold text-slate-900 dark:text-white">{title}</h1>
           {count !== undefined && (
-            <span className="px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-600 text-xs font-semibold">
+            <span className="px-2.5 py-0.5 rounded-full bg-gradient-to-r from-primary to-[oklch(0.55_0.22_280)] text-white text-xs font-semibold shadow-sm shadow-primary/30">
               {count}
             </span>
           )}
